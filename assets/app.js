@@ -4641,8 +4641,8 @@
         'Гэкхо': 'Flag_Gekho.png',
         'Зетты': 'Flag_Zet.png',
         'Ювианцы': 'Flag_Uvian.png',
-        'Нейтральные': 'Flag_Balter.png',
-        'Неизвестные': 'Flag_unknown.png',
+        'Нейтраные': 'Flag_Balter.png',
+        'custom-g-363b6a7b-e566-4c2f-b061-b7f4bf529b63': 'Flag_unknown.png',
         'Либерио': 'Flag_Lib.png'
     };
     const assets = {};
