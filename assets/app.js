@@ -4028,7 +4028,7 @@
             type: 'application/zip'
         });
     }
-    const runtime = ['guide-v45.js', 'progression-v45.css', 'battle-event-v45.css', 'partial-export-v45.js', 'fleet-setup-v44.js', 'trait-text-v44.js', 'trait-text-v44.css', 'faction-layout-v43.css', 'battle-roster-v43.js', 'battle-roster-v43.css', 'earth-v41.js', 'factions-v41.js', 'factions-v41.css', 'card-v39.css', 'faction-crests.js', 'territory-crests.js', 'assets/crests/Flag_Meli.png', 'assets/crests/Flag_Katon.png', 'assets/crests/Flag_Ef.png', 'assets/crests/Flag_Balter.png', 'assets/crests/Flag_Uvian.png', 'assets/crests/Flag_Lib.png', 'assets/crests/Flag_Ynatari.png', 'assets/crests/Flag_Gekho.png', 'assets/crests/Flag_Finisant.png', 'assets/crests/Flag_Moji.png', 'assets/crests/Flag_Zet.png', 'assets/crests/Flag_Human.png', 'commander-profile-v38.css', 'trait-browser-v37.js', 'trait-browser-v37.css', 'personality-v37.js', 'personality-v37.css', 'cards-v36.css', 'guide-v35.js', 'controls-v35.css', 'controls-v35.js', 'guide-v34.js', 'commander-registry.js', 'commander-registry.css', 'ui-v32.css', 'guide-v31.js', 'guide-v31.css', 'ui-v31.js', 'ui-v31.css', 'window-v30.css', 'battle-v30.css', 'round-orders.css', 'sector-ui.js', 'sector-ui.css', 'fleet-command.js', 'header-repair.js', 'header-repair.css', 'final-layout.js', 'final-layout.css', 'window-standards.js', 'window-standards.css', 'combined-editor.js', 'combined-editor.css', 'object-order.css', 'unified-ui.css', 'unified-ui.js', 'system-objects.css', 'system-objects.js', 'window-behavior.js', 'smooth-territories.js', 'panel-polish.js', 'panel-polish.css', 'territories.css', 'territory-engine.js', 'territories.js', 'combat-options.css', 'combat-help.js', 'rounds.css', 'ship-types.js', 'battle-report.css', 'polish.css', 'enhancements.css', 'enhancements.js', 'battle.css', 'battle-engine.js', 'battle.js', 'dossier.css', 'refinements.css', 'motion.css', 'events.css', 'cartographer.css', 'styles.css', 'universe.css', 'mobile.css', 'editor.css', 'app.js', 'editor.js', 'assets/galaxy-clean.png', 'assets/influence.png'];
+    const runtime = ['guide-v45.js', 'progression-v45.css', 'battle-event-v45.css', 'partial-export-v45.js', 'fleet-setup-v44.js', 'trait-text-v44.js', 'trait-text-v44.css', 'faction-layout-v43.css', 'battle-roster-v43.js', 'battle-roster-v43.css', 'earth-v41.js', 'factions-v41.js', 'factions-v41.css', 'card-v39.css', 'faction-crests.js', 'territory-crests.js', 'assets/crests/Flag_Meli.png', 'assets/crests/Flag_Katon.png', 'assets/crests/Flag_Ef.png', 'assets/crests/Flag_Balter.png', 'assets/crests/Flag_Uvian.png', 'assets/crests/Flag_Lib.png', 'assets/crests/Flag_Ynatari.png', 'assets/crests/Flag_Gekho.png', 'assets/crests/Flag_Finisant.png', 'assets/crests/Flag_Moji.png', 'assets/crests/Flag_Zet.png', 'assets/crests/Flag_Human.png','assets/crests/Flag_Ali.png','assets/crests/Flag_unknown.png', 'commander-profile-v38.css', 'trait-browser-v37.js', 'trait-browser-v37.css', 'personality-v37.js', 'personality-v37.css', 'cards-v36.css', 'guide-v35.js', 'controls-v35.css', 'controls-v35.js', 'guide-v34.js', 'commander-registry.js', 'commander-registry.css', 'ui-v32.css', 'guide-v31.js', 'guide-v31.css', 'ui-v31.js', 'ui-v31.css', 'window-v30.css', 'battle-v30.css', 'round-orders.css', 'sector-ui.js', 'sector-ui.css', 'fleet-command.js', 'header-repair.js', 'header-repair.css', 'final-layout.js', 'final-layout.css', 'window-standards.js', 'window-standards.css', 'combined-editor.js', 'combined-editor.css', 'object-order.css', 'unified-ui.css', 'unified-ui.js', 'system-objects.css', 'system-objects.js', 'window-behavior.js', 'smooth-territories.js', 'panel-polish.js', 'panel-polish.css', 'territories.css', 'territory-engine.js', 'territories.js', 'combat-options.css', 'combat-help.js', 'rounds.css', 'ship-types.js', 'battle-report.css', 'polish.css', 'enhancements.css', 'enhancements.js', 'battle.css', 'battle-engine.js', 'battle.js', 'dossier.css', 'refinements.css', 'motion.css', 'events.css', 'cartographer.css', 'styles.css', 'universe.css', 'mobile.css', 'editor.css', 'app.js', 'editor.js', 'assets/galaxy-clean.png', 'assets/influence.png'];
     let embedded = null;
     const assets = document.getElementById('export-assets');
     if (assets)
@@ -4631,7 +4631,7 @@
 (() => {
     const files = {
         'Земляне': 'Flag_Human.png',
-        'Альянс': 'Flag_Human.png',
+        'Альянс': 'Flag_Ali.png',
         'Унатари': 'Flag_Ynatari.png',
         'Можжи': 'Flag_Moji.png',
         'Катонцы': 'Flag_Katon.png',
@@ -4641,6 +4641,8 @@
         'Гэкхо': 'Flag_Gekho.png',
         'Зетты': 'Flag_Zet.png',
         'Ювианцы': 'Flag_Uvian.png',
+        'Нейтральные': 'Flag_Balter.png',
+        'Неизвестные': 'Flag_unknown.png',
         'Либерио': 'Flag_Lib.png'
     };
     const assets = {};
