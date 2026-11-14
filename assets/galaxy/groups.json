@@ -66,7 +66,7 @@
       "overlord": null
     },
     {
-      "key": "Нейтральные",
+      "key": "Нейтраные",
       "label": "Нейтральные",
       "color": "#9cabb8",
       "overlord": null
@@ -78,7 +78,7 @@
       "overlord": "Ювианцы"
     },
     {
-      "key": "Неизвестные",
+      "key": "custom-g-363b6a7b-e566-4c2f-b061-b7f4bf529b63",
       "label": "Неизвестные",
       "color": "#dac03e",
       "overlord": null
