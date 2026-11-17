@@ -1,3 +1,4 @@
+/* build 2026-11-18: главный калибр, класс корабля, скрытие мультиатаки (!important), память приказов */
 /* territory-engine.js */
 (function (root, factory) {
     const api = factory();
@@ -1235,6 +1236,12 @@
         }),
         warp_jump: trait('warp_jump', 'Варп-прыжок', 'Прямое движение в любой сектор без расхода атаки.', 'Запрет варпа отключает способность.', 'Любая дистанция; сбежавшие корабли не возвращаются.', 'Не более одного движения за раунд.', {
             warpJump: true
+        }),
+        swarm_fleet: trait('swarm_fleet', 'Флот Роя', 'Шанс неповиновения всегда 0: корабль выполняет явный приказ движения в любом состоянии, даже из сектора «Столкновение».', 'Недостатков нет.', 'Действует на явные приказы движения из сектора «Столкновение».', 'Всё сражение.', {
+            noDisobedience: true
+        }),
+        sniper_nose: trait('sniper_nose', 'Главный калибр', 'Первая атака за раунд (Нос, модуль 1) бьёт без ограничения дальности: целью может быть любой живой корабль противника в любом секторе, включая тылы.', 'Черта недоступна, если носовой модуль (модуль 1) уничтожен или у него 0 мультиатак.', 'Только модели с носовым модулем: Модульный, Титан, Колос.', 'Одна атака за раунд — первая по порядку выстрелов.', {
+            longRangeAttack: true
         })
     });
     const eventTraits = freeze({
@@ -1258,6 +1265,8 @@
         const selected = f.traits === undefined ? [] : f.traits;
         if (!Array.isArray(selected) || selected.length > 3 || new Set(selected).size !== selected.length || selected.some(id => !Object.hasOwn(shipTraits, id)))
             throw Error('Черты корабля: максимум 3 уникальные известные черты.');
+        if (selected.includes('sniper_nose') && !['modular', 'titan', 'kolos'].includes(f.model))
+            throw Error('Черта «Главный калибр» доступна только моделям Модульный, Титан и Колос.');
         return [...selected];
     }
     const cleanupThresholds = freeze({
@@ -1308,6 +1317,8 @@
     }
     function disobedienceChance(unit, destination) {
         if (unit.position !== 'center' || destination === unit.position || unit.escaped)
+            return 0;
+        if (hasShipTrait(unit, 'swarm_fleet'))
             return 0;
         const health = Math.max(0, Math.min(1, unit.hp / unit.maxHp));
         return Math.max(0, Math.min(.7, .15 + .35 * (1 - health) + .03 * (5 - (unit.commander ? (unit.commander.level ?? 5) : 1)) + traitSum(unit, 'disobedience') + (destination === 'rear:' + unit.sideId ? traitSum(unit, 'withdrawalDisobedience') : 0) + (['guard:' + unit.sideId, 'rear:' + unit.sideId].includes(destination) ? traitSum(unit, 'recoveryDisobedience') : 0)));
@@ -1997,6 +2008,9 @@
         const moved = new Set(),
         movementRefused = new Set(),
         retreatChecked = new Set(),
+        longShots = new Set(),
+        longShotReady = attacker => hasShipTrait(attacker, 'sniper_nose') && !longShots.has(attacker.id) && (attacker.modules?.[0]?.hp > 0 && (attacker.modules[0].attacks ?? 1) > 0),
+        shotTargets = (attacker, pool) => longShotReady(attacker) ? pool.filter(u => u.hp > 0 && !u.escaped && u.sideId !== attacker.sideId) : legalTargets(attacker, pool),
         pathChecked = new Set(),
         pathMistakes = new Map(),
         focusBySide = new Map(),
@@ -2015,8 +2029,9 @@
                 const enemies = units.filter(u => u.hp > 0 && !u.escaped && u.sideId !== attacker.sideId);
                 if (!enemies.length)
                     break;
-                let targets = legalTargets(attacker, units),
+                let targets = shotTargets(attacker, units),
                 from = attacker.position;
+                const longReady = longShotReady(attacker);
                 const player = sides.find(s => s.id === attacker.sideId).isPlayer;
                 if (commandCleanup(attacker)) {
                     continue;
@@ -2185,7 +2200,7 @@
                         continue;
                     // The same attack slot fires from the new sector. Movement stays spent.
                     from = attacker.position;
-                    targets = legalTargets(attacker, units);
+                    targets = shotTargets(attacker, units);
                 }
                 if (!targets.length)
                     continue;
@@ -2289,8 +2304,14 @@
                     damage,
                     shieldDefense,
                     shieldConsumed,
-                    targetHp: target.hp
+                    targetHp: target.hp,
+                    ...(longReady ? {
+                        longShot: true,
+                        longShotModule: 'Нос'
+                    } : {})
                 });
+                if (longReady)
+                    longShots.add(attacker.id);
             }
         }
         for (const asteroid of asteroids)
@@ -2508,7 +2529,7 @@
         kolos: {name: 'Колос', model: 'kolos', hp: 160, attackMin: 11, attackMax: 50, defenseMin: 7, defenseMax: 50, modules: [1, 2, 2, 2]}
     });
 
-    const shipTraitIds = ['repair_drones', 'force_shields', 'warp_jump'];
+    const shipTraitIds = ['repair_drones', 'force_shields', 'warp_jump', 'swarm_fleet', 'sniper_nose'];
     const fallbackTraits = {
         repair_drones: {
             name: 'Ремонтные дроны',
@@ -2521,6 +2542,14 @@
         warp_jump: {
             name: 'Варп-прыжок',
             description: 'Прямое перемещение между секторами.'
+        },
+        swarm_fleet: {
+            name: 'Флот Роя',
+            description: 'Шанс неповиновения всегда 0: приказы выполняются.'
+        },
+        sniper_nose: {
+            name: 'Главный калибр',
+            description: 'Первая атака за раунд бьёт без ограничения дальности.'
         }
     };
     function shipTraits() {
@@ -2580,6 +2609,8 @@
         legend.textContent = 'Черты типа кораблей';
         grid.className = 'ship-trait-grid';
         for (const id of shipTraitIds) {
+            if (id === 'sniper_nose' && !['modular', 'titan', 'kolos'].includes(t.model))
+                continue;
             const label = document.createElement('label');
             label.className = 'ship-trait-choice';
             const input = document.createElement('input');
@@ -2626,7 +2657,7 @@
             };
             card.append(name);
             const modelLabel = document.createElement('label');
-            modelLabel.textContent = 'Модель корабля';
+            modelLabel.textContent = 'Класс корабля';
             const model = document.createElement('select');
             model.className = 'ship-model-choice';
             model.append(new Option('Малый', 'small'), new Option('Средний', 'medium'), new Option('Большой', 'large'), new Option('Модульный', 'modular'), new Option('Корвет', 'class:corvette'), new Option('Эсминец', 'class:destroyer'), new Option('Фрегат', 'class:frigate'), new Option('Крейсер', 'class:cruiser'), new Option('Линкор', 'class:battleship'), new Option('Титан', 'titan'), new Option('Колос', 'kolos'));
@@ -2676,6 +2707,10 @@
                 modular = m === 'modular',
                 fixed = m === 'titan' ? 3 : m === 'kolos' ? 4 : 0;
                 multi.hidden = modular || fixed > 0;
+                if (modular || fixed > 0)
+                    multi.style.setProperty('display', 'none', 'important');
+                else
+                    multi.style.removeProperty('display');
                 modBox.hidden = !(modular || fixed > 0);
                 if (!modular && !fixed)
                     return;
@@ -2730,6 +2765,8 @@
                     t.shipClass = undefined;
                 }
                 applyModelView();
+                if (!['modular', 'titan', 'kolos'].includes(t.model))
+                    t.traits = (t.traits || []).filter(x => x !== 'sniper_nose');
             };
             modelLabel.append(model);
             card.append(modelLabel);
@@ -6453,6 +6490,9 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         selectedBattleEventTraits = [...(item.eventTraits || [])];
         autoRunning = false;
         pendingCommands = [];
+        const panelEl = document.getElementById('round-orders');
+        if (panelEl)
+            panelEl.replaceChildren();
         pendingBonuses = [];
         $('round-controls').hidden = true;
         eventId = item.id;
@@ -6959,7 +6999,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
 
         };
         for (const l of result.log.filter(l => l.round === result.completedRounds).slice(-100))
-            log.append(node('div', l.action === 'attack' ? `${unitLabel(l.attacker)} → ${unitLabel(l.target)}: атака ${l.attackTotal ?? l.attack}, защита ${l.defenseTotal ?? l.defense}, урон ${l.damage}${l.critical ? ' · КРИТ' : ''}` : `${(l.attacker || l.unitId || l.unit) ? unitLabel(l.attacker || l.unitId || l.unit) : ''} · ${{
+            log.append(node('div', l.action === 'attack' ? `${unitLabel(l.attacker)} → ${unitLabel(l.target)}: атака ${l.attackTotal ?? l.attack}, защита ${l.defenseTotal ?? l.defense}, урон ${l.damage}${l.critical ? ' · КРИТ' : ''}${l.longShot ? ' · дальний выстрел' : ''}` : `${(l.attacker || l.unitId || l.unit) ? unitLabel(l.attacker || l.unitId || l.unit) : ''} · ${{
                         attack_asteroid: 'Огонь по астероиду',
                         asteroid_hit: 'Удар астероида',
                         asteroid_spawn: 'Астероидный дождь',
@@ -7015,11 +7055,23 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         if (!fullResult)
             return;
         renderEventTraits();
+        const kept = {
+            bonus: ['bonus-scope', 'bonus-attack', 'bonus-defense'].reduce((acc, id) => document.getElementById(id) ? { ...acc, [id]: $(id).value } : acc, {}),
+            command: ['command-side', 'command-fleet', 'command-type', 'command-op', 'command-hp', 'command-count', 'command-action', 'command-target', 'command-destination'].reduce((acc, id) => document.getElementById(id) ? { ...acc, [id]: $(id).value } : acc, {})
+        };
         ordersPanel.replaceChildren();
         ordersPanel.append(node('h3', 'ПРИКАЗЫ И МОДИФИКАТОРЫ ДЛЯ РАУНДА ' + (fullResult.completedRounds + 1)));
         const scopeOptions = [['', 'Все корабли'], ...sides.map(s => ['side:' + s.id, s.name]), ...roster.filter(f => sides.some(s => s.fleetIds.some(id => String(id) === String(f.id)))).flatMap(f => [['fleet:' + f.id, f.name], ...BattleEngine.types(f).map(t => ['type:' + f.id + '|' + t.id, f.name + ' · ' + t.name])])];
         const bonus = node('div', null, 'order-form bonus-form');
         bonus.append(selector('Область бонуса', 'bonus-scope', scopeOptions), inputField('Атака ±', 'bonus-attack'), inputField('Защита ±', 'bonus-defense'));
+        for (const [id, value] of Object.entries(kept.bonus))
+            if (document.getElementById(id)) {
+                if ($(id).tagName === 'SELECT') {
+                    if ([...$(id).options].some(o => o.value === value))
+                        $(id).value = value;
+                } else
+                    $(id).value = value;
+            }
         const add = node('button', '+ Бонус', 'primary-btn');
         add.id = 'add-bonus';
         add.onclick = () => {
@@ -7092,6 +7144,24 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             $('command-side').onchange = updateFleets;
             $('command-fleet').onchange = updateTypes;
             updateFleets();
+            const ck = kept.command || {};
+            if (ck['command-side'] && [...$('command-side').options].some(o => o.value === ck['command-side'])) {
+                $('command-side').value = ck['command-side'];
+                updateFleets();
+                if (ck['command-fleet'] && [...$('command-fleet').options].some(o => o.value === ck['command-fleet'])) {
+                    $('command-fleet').value = ck['command-fleet'];
+                    updateTypes();
+                    if (ck['command-type'] && [...$('command-type').options].some(o => o.value === ck['command-type']))
+                        $('command-type').value = ck['command-type'];
+                }
+            }
+            for (const id of ['command-op', 'command-hp', 'command-count', 'command-action', 'command-target', 'command-destination'])
+                if (ck[id] !== undefined && ck[id] !== '') {
+                    const el = $(id);
+                    if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === ck[id]))
+                        continue;
+                    el.value = ck[id];
+                }
         } else
             ordersPanel.append(node('p', 'Для ручных приказов отметьте «Сторона игроков» перед боем.'));
         const queue = node('div');
@@ -9091,7 +9161,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             return;
         const d = document.createElement('details');
         d.className = 'guide-topic';
-        d.innerHTML = '<summary>Уровни, черты кораблей и условия сражения</summary><div class="guide-topic-content"><h4>Командир и послушание</h4><p>Командира можно назначить любому флоту. Фракция служит категорией реестра и источником герба, а не ограничением. При назначении используйте поиск по имени.</p><p>Уровень от 1 до 10 влияет на вероятность выполнения перемещения и выбора рекомендованной цели. Высокий уровень лучше оценивает позиции; низкий может принять несогласованное решение. Характер сохраняет свой стиль.</p><p>Неповиновение ограничено 0–70% после уровня и черт. Шанс до ограничения: 15% + 35% × доля потерянных HP + 3% × (5 − уровень) + поправки черт. Без командира используется уровень 1; старым командирам назначается уровень 5. На уровне 10 с дисциплиной риск можно снизить до 0%, на уровне 1 при тяжёлых повреждениях и рискованных чертах достигнуть 70%. При отказе перемещения корабль остаётся на месте и сохраняет атаки. При отказе от целеуказания выбирает другую доступную цель. Проценты черт складываются напрямую, не умножаются.</p><h4>Черты типов кораблей</h4><p>Черты задаются каждому типу в редакторе флота и действуют на все корабли этого типа. Ремонтные дроны и Силовые щиты запрещают окончательное бегство через собственный тыл. На третьем завершённом раунде непрерывного пребывания там дроны восстанавливают 1 HP (не выше максимума), щиты дают +5 к броску защиты до первого повреждающего попадания. Срабатывание одно за заход; выход сбрасывает отсчёт. Щиты не складываются.</p><p>Варп-прыжок даёт один бесплатный переход в любой сектор за раунд, без расхода атаки. Запрет варпа временно отключает это преимущество: остаётся обычное движение через соседний сектор с расходом атаки. Сбежавших вернуть нельзя.</p><h4>Условия сражения</h4><p>Перед боем и перед любым новым раундом можно включить или отключить условия. Они не пересчитывают историю.</p><p>Астероидный дождь создаёт 10 астероидов с 1–3 HP через каждые два раунда, в случайных секторах. Игроки задают приказ «Зачистить астероиды» для кораблей выбранного сектора. ИИ принимает решение исходя из характера, уровня и доли своих войск в секторе. Астероиды в секторе цели могут перехватить обычный выстрел: 15% за каждый астероид, максимум 45%. При зачистке выстрел расходует действие атаки и сравнивается с защитой 0; успешный выстрел снимает 1 HP астероида. Приказ «Приоритет цели» направляет огонь в выбранную вражескую сторону; корабль может ослушаться и выбрать другую доступную цель. Неразрушенные астероиды наносят урон кораблям своего сектора в конце раунда. Отключение дождя прекращает новые появления, но не удаляет уже появившиеся астероиды.</p><h4>Публикация изменений</h4><p>Данные карты находятся в assets/galaxy/. «Экспорт только изменений» выгружает изменённые файлы данных относительно опубликованной основы. Загрузите файлы с теми же путями поверх сайта. Для первого размещения или обновления кода используйте полную сборку; частичный экспорт не заменяет код приложения.</p></div>';
+        d.innerHTML = '<summary>Уровни, черты кораблей и условия сражения</summary><div class="guide-topic-content"><h4>Командир и послушание</h4><p>Командира можно назначить любому флоту. Фракция служит категорией реестра и источником герба, а не ограничением. При назначении используйте поиск по имени.</p><p>Уровень от 1 до 10 влияет на вероятность выполнения перемещения и выбора рекомендованной цели. Высокий уровень лучше оценивает позиции; низкий может принять несогласованное решение. Характер сохраняет свой стиль.</p><p>Неповиновение ограничено 0–70% после уровня и черт. Шанс до ограничения: 15% + 35% × доля потерянных HP + 3% × (5 − уровень) + поправки черт. Без командира используется уровень 1; старым командирам назначается уровень 5. На уровне 10 с дисциплиной риск можно снизить до 0%, на уровне 1 при тяжёлых повреждениях и рискованных чертах достигнуть 70%. При отказе перемещения корабль остаётся на месте и сохраняет атаки. При отказе от целеуказания выбирает другую доступную цель. Проценты черт складываются напрямую, не умножаются.</p><h4>Черты типов кораблей</h4><p>Черты задаются каждому типу в редакторе флота и действуют на все корабли этого типа. Ремонтные дроны и Силовые щиты запрещают окончательное бегство через собственный тыл. На третьем завершённом раунде непрерывного пребывания там дроны восстанавливают 1 HP (не выше максимума), щиты дают +5 к броску защиты до первого повреждающего попадания. Срабатывание одно за заход; выход сбрасывает отсчёт. Щиты не складываются.</p><p>Варп-прыжок даёт один бесплатный переход в любой сектор за раунд, без расхода атаки. Запрет варпа временно отключает это преимущество: остаётся обычное движение через соседний сектор с расходом атаки. Сбежавших вернуть нельзя.</p><p>Флот Роя обнуляет шанс неповиновения: корабль выполняет явный приказ движения при любых повреждениях и на любом уровне командира, даже из сектора «Столкновение». Недостатков нет.</p><p>Главный калибр доступен только моделям Модульный, Титан и Колос. Черта привязана к носовому модулю (модуль 1): первая атака корабля за раунд игнорирует ограничения дальности — целью может стать любой живой корабль противника в любом секторе, включая тылы. Секторные поправки (штраф арьергарда, броня арьергарда) сохраняются. Если носовой модуль уничтожен или у него 0 мультиатак, дальнобойный выстрел недоступен.</p><h4>Условия сражения</h4><p>Перед боем и перед любым новым раундом можно включить или отключить условия. Они не пересчитывают историю.</p><p>Астероидный дождь создаёт 10 астероидов с 1–3 HP через каждые два раунда, в случайных секторах. Игроки задают приказ «Зачистить астероиды» для кораблей выбранного сектора. ИИ принимает решение исходя из характера, уровня и доли своих войск в секторе. Астероиды в секторе цели могут перехватить обычный выстрел: 15% за каждый астероид, максимум 45%. При зачистке выстрел расходует действие атаки и сравнивается с защитой 0; успешный выстрел снимает 1 HP астероида. Приказ «Приоритет цели» направляет огонь в выбранную вражескую сторону; корабль может ослушаться и выбрать другую доступную цель. Неразрушенные астероиды наносят урон кораблям своего сектора в конце раунда. Отключение дождя прекращает новые появления, но не удаляет уже появившиеся астероиды.</p><h4>Публикация изменений</h4><p>Данные карты находятся в assets/galaxy/. «Экспорт только изменений» выгружает изменённые файлы данных относительно опубликованной основы. Загрузите файлы с теми же путями поверх сайта. Для первого размещения или обновления кода используйте полную сборку; частичный экспорт не заменяет код приложения.</p></div>';
         body.insertBefore(d, body.querySelector('.guide-end'));
         for (const e of document.querySelectorAll('.guide-body p,.guide-body li,.guide-body dd')) {
             if (e.closest('details') === d)
