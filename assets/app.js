@@ -1351,17 +1351,46 @@
             hp: f.hp ?? 3
         };
         for (const [k, v] of Object.entries(s))
-            if (!Number.isInteger(v) || v < (k === 'hp' ? 1 : 0) || v > (k === 'count' ? 500 : k === 'hp' ? 100 : 1000))
+            if (!Number.isInteger(v) || v < (k === 'hp' ? 1 : 0) || v > (k === 'count' ? 500 : k === 'hp' ? 300 : 1000))
                 throw Error('Некорректный параметр ' + k);
         if (s.attackMin > s.attackMax || s.defenseMin > s.defenseMax)
             throw Error('Нижний порог выше верхнего.');
-        s.multiAttack = f.multiAttack === true;
-        s.attacks = s.multiAttack ? Number(f.attacks ?? 2) : 1;
-        if (!Number.isSafeInteger(s.attacks) || s.attacks < (s.multiAttack ? 2 : 1))
-            throw Error('Мультиатака: целое количество от 2.');
         s.model = f.model ?? 'medium';
-        if (!['small', 'medium', 'large'].includes(s.model))
-            throw Error('Некорректная модель корабля.');
+        if (s.model === 'modular') {
+            const mods = Array.isArray(f.modules) ? f.modules : [];
+            if (!mods.length || mods.length > 10)
+                throw Error('Модульный корабль: нужно от 1 до 10 модулей.');
+            if (mods.some(m => !Number.isSafeInteger(m) || m < 0 || m > 1000))
+                throw Error('Модульный корабль: мультиатаки модулей — целые числа от 0 до 1000.');
+            s.modules = [...mods];
+            s.attacks = mods.reduce((n, m) => n + m, 0);
+            s.multiAttack = s.attacks > 1;
+        } else if (s.model === 'titan') {
+            const mods = Array.isArray(f.modules) ? f.modules : [];
+            if (mods.length !== 3)
+                throw Error('Титан: ровно 3 модуля (нос, центр, корма).');
+            if (mods.some(m => !Number.isSafeInteger(m) || m < 0 || m > 1000))
+                throw Error('Титан: мультиатаки модулей — целые числа от 0 до 1000.');
+            s.modules = [...mods];
+            s.attacks = mods.reduce((n, m) => n + m, 0);
+            s.multiAttack = s.attacks > 1;
+        } else if (s.model === 'kolos') {
+            const mods = Array.isArray(f.modules) ? f.modules : [];
+            if (mods.length !== 4)
+                throw Error('Колос: ровно 4 модуля (нос, левое крыло, правое крыло, киль).');
+            if (mods.some(m => !Number.isSafeInteger(m) || m < 0 || m > 1000))
+                throw Error('Колос: мультиатаки модулей — целые числа от 0 до 1000.');
+            s.modules = [...mods];
+            s.attacks = mods.reduce((n, m) => n + m, 0);
+            s.multiAttack = s.attacks > 1;
+        } else {
+            if (!['small', 'medium', 'large'].includes(s.model))
+                throw Error('Некорректная модель корабля.');
+            s.multiAttack = f.multiAttack === true;
+            s.attacks = s.multiAttack ? Number(f.attacks ?? 2) : 1;
+            if (!Number.isSafeInteger(s.attacks) || s.attacks < (s.multiAttack ? 2 : 1))
+                throw Error('Мультиатака: целое количество от 2.');
+        }
         commander(f);
         s.traits = selectedShipTraits(f);
         if (f.shipTypes !== undefined)
@@ -1617,6 +1646,17 @@
                             attacks: t.attacks,
                             fleetId: f.id,
                             sideId: side.id,
+                            ...((t.model === 'modular' || t.model === 'titan' || t.model === 'kolos') && Array.isArray(t.modules) ? {
+                                modules: (() => {
+                                    const per = Math.floor(t.hp / t.modules.length),
+                                    extra = t.hp % t.modules.length;
+                                    return t.modules.map((a, idx) => ({
+                                        attacks: a,
+                                        maxHp: per + (idx === t.modules.length - 1 ? extra : 0),
+                                        hp: per + (idx === t.modules.length - 1 ? extra : 0)
+                                    }));
+                                })()
+                            } : {}),
                             maxHp: t.hp,
                             hp: t.hp,
                             attackMin: t.attackMin,
@@ -1786,7 +1826,7 @@
     } = {}) {
         if (!previous || !Array.isArray(previous.units) || !Number.isInteger(previous.rngState) || previous.rngState < 0 || previous.rngState > 4294967295)
             throw Error('Некорректное состояние боя.');
-        if (previous.units.some(u => !Number.isSafeInteger(u.attacks) || u.attacks < 1) || previous.units.filter(u => u.hp > 0 && !u.escaped).reduce((n, u) => n + u.attacks, 0) > 2000000)
+        if (previous.units.some(u => !Number.isSafeInteger(u.attacks) || u.attacks < (u.modules ? 0 : 1)) || previous.units.filter(u => u.hp > 0 && !u.escaped).reduce((n, u) => n + u.attacks, 0) > 2000000)
             throw Error('Лимит 2 млн действий за раунд.');
         if (!Array.isArray(commands) || !Array.isArray(bonuses) || commands.length > 1500 || bonuses.length > 1500)
             throw Error('Некорректные команды или бонусы.');
@@ -1833,6 +1873,7 @@
             return freeze(previous);
         const units = previous.units.map(u => ({
                     ...u,
+                    ...(u.modules ? {modules: u.modules.map(m => ({...m}))} : {}),
                     centerEntryRound: null,
                     emergencyReentryRound: null
                 })),
@@ -1880,11 +1921,35 @@
                 });
             }
         const living = units.filter(u => u.hp > 0 && !u.escaped),
-        order = splitMultiAttacks ? living.flatMap(u => Array(u.attacks).fill(u)) : [...living];
+        order = splitMultiAttacks ? living.flatMap(u => Array(u.modules ? 1 : u.attacks).fill(u)) : [...living];
         for (let i = order.length - 1; i > 0; i--) {
             const j = Math.floor(random() * (i + 1));
             [order[i], order[j]] = [order[j], order[i]];
         }
+        const hitUnit = (target, dmg) => {
+            if (!target.modules) {
+                target.hp = Math.max(0, target.hp - dmg);
+                return;
+            }
+            for (let d = 0; d < dmg; d++) {
+                const alive = target.modules.filter(m => m.hp > 0);
+                if (!alive.length)
+                    break;
+                const pick = alive[Math.floor(random() * alive.length)];
+                pick.hp = Math.max(0, pick.hp - 1);
+                if (pick.hp === 0) {
+                    target.attacks = Math.max(0, target.attacks - pick.attacks);
+                    record({
+                        round,
+                        action: 'module_lost',
+                        unit: target.id,
+                        moduleAttacks: pick.attacks,
+                        remainingAttacks: target.attacks
+                    });
+                }
+            }
+            target.hp = target.modules.some(m => m.hp > 0) ? target.modules.reduce((n, m) => n + m.hp, 0) : 0;
+        };
         const attackAsteroid = (attacker, target, turn, shot, extra = {}) => {
             const rawAttack = roll(attacker.attackMin, attacker.attackMax),
             attack = rawAttack + traitAttack(attacker) + (attacker.centerEntryRound === round ? traitSum(attacker, 'entryAttack') : 0) + bonuses.filter(b => matches(attacker, b)).reduce((n, b) => n + b.attack, 0),
@@ -1942,7 +2007,7 @@
         };
         for (const attacker of order) {
             turn++;
-            const shots = splitMultiAttacks ? 1 : attacker.attacks;
+            const shots = attacker.modules ? attacker.attacks : splitMultiAttacks ? 1 : attacker.attacks;
             for (let shot = 1; shot <= shots; shot++) {
                 currentShot = shot;
                 if (attacker.hp <= 0 || attacker.escaped)
@@ -2201,7 +2266,7 @@
                 const shieldConsumed = shieldDefense > 0 && damage > 0;
                 if (shieldConsumed)
                     target.forceShield = 0;
-                target.hp = Math.max(0, target.hp - damage);
+                hitUnit(target, damage);
                 record({
                     round,
                     turn,
@@ -2235,7 +2300,7 @@
                     const target = candidates[roll(0, candidates.length - 1)],
                     shieldConsumed = (target.forceShield ?? 0) > 0;
                     target.forceShield = 0;
-                    target.hp = Math.max(0, target.hp - 1);
+                    hitUnit(target, 1);
                     record({
                         round,
                         action: 'asteroid_damage',
@@ -2258,7 +2323,15 @@
                     u.rearTraitTriggered = true;
                     if (hasShipTrait(u, 'repair_drones')) {
                         const before = u.hp;
-                        u.hp = Math.min(u.maxHp, u.hp + 1);
+                        if (u.modules) {
+                            const damaged = u.modules.filter(mm => mm.hp > 0 && mm.hp < mm.maxHp);
+                            if (damaged.length) {
+                                const pick = damaged[Math.floor(random() * damaged.length)];
+                                pick.hp = Math.min(pick.maxHp, pick.hp + 1);
+                                u.hp = u.modules.reduce((n, mm) => n + mm.hp, 0);
+                            }
+                        } else
+                            u.hp = Math.min(u.maxHp, u.hp + 1);
                         record({
                             round,
                             action: 'repair',
@@ -2306,6 +2379,7 @@
             unitCenterEntryRound: units.map(u => u.centerEntryRound),
             unitEmergencyReentryRound: units.map(u => u.emergencyReentryRound),
             unitHp: units.map(u => u.hp),
+            unitModuleHp: units.map(u => u.modules ? u.modules.map(m => m.hp) : null),
             unitZones: units.map(u => u.position),
             unitWithdrawn: units.map(u => u.withdrawn),
             unitEscaped: units.map(u => u.escaped),
@@ -2423,7 +2497,16 @@
         attackMax: 'Атака до',
         defenseMin: 'Защита от',
         defenseMax: 'Защита до'
-    };
+    },
+    CLASS_PRESETS = Object.freeze({
+        corvette: {name: 'Корвет', model: 'small', hp: 2, attackMin: 1, attackMax: 20, defenseMin: 1, defenseMax: 20, multiAttack: false, attacks: 1},
+        destroyer: {name: 'Эсминец', model: 'medium', hp: 4, attackMin: 1, attackMax: 20, defenseMin: 2, defenseMax: 20, multiAttack: false, attacks: 1},
+        frigate: {name: 'Фрегат', model: 'medium', hp: 4, attackMin: 2, attackMax: 30, defenseMin: 2, defenseMax: 30, multiAttack: true, attacks: 2},
+        cruiser: {name: 'Крейсер', model: 'large', hp: 6, attackMin: 3, attackMax: 30, defenseMin: 3, defenseMax: 30, multiAttack: true, attacks: 3},
+        battleship: {name: 'Линкор', model: 'large', hp: 10, attackMin: 4, attackMax: 40, defenseMin: 4, defenseMax: 40, multiAttack: true, attacks: 3},
+        titan: {name: 'Титан', model: 'titan', hp: 30, attackMin: 3, attackMax: 50, defenseMin: 3, defenseMax: 50, modules: [1, 2, 2]},
+        kolos: {name: 'Колос', model: 'kolos', hp: 160, attackMin: 11, attackMax: 50, defenseMin: 7, defenseMax: 50, modules: [1, 2, 2, 2]}
+    });
 
     const shipTraitIds = ['repair_drones', 'force_shields', 'warp_jump'];
     const fallbackTraits = {
@@ -2546,9 +2629,108 @@
             modelLabel.textContent = 'Модель корабля';
             const model = document.createElement('select');
             model.className = 'ship-model-choice';
-            model.append(new Option('Малый', 'small'), new Option('Средний', 'medium'), new Option('Большой', 'large'));
-            model.value = t.model || 'medium';
-            model.onchange = () => t.model = model.value;
+            model.append(new Option('Малый', 'small'), new Option('Средний', 'medium'), new Option('Большой', 'large'), new Option('Модульный', 'modular'), new Option('Корвет', 'class:corvette'), new Option('Эсминец', 'class:destroyer'), new Option('Фрегат', 'class:frigate'), new Option('Крейсер', 'class:cruiser'), new Option('Линкор', 'class:battleship'), new Option('Титан', 'titan'), new Option('Колос', 'kolos'));
+            model.value = t.shipClass && CLASS_PRESETS[t.shipClass] ? (t.shipClass === 'titan' || t.shipClass === 'kolos' ? t.shipClass : 'class:' + t.shipClass) : (t.model || 'medium');
+            const modBox = document.createElement('div');
+            modBox.className = 'modular-editor';
+            const moduleCountLabel = document.createElement('label');
+            moduleCountLabel.textContent = 'Количество модулей';
+            const moduleCount = document.createElement('input');
+            moduleCount.type = 'number';
+            moduleCount.min = 1;
+            moduleCount.max = 10;
+            moduleCount.step = 1;
+            moduleCount.setAttribute('aria-label', 'Количество модулей');
+            moduleCountLabel.append(moduleCount);
+            const moduleRows = document.createElement('div');
+            moduleRows.className = 'module-rows';
+            modBox.append(moduleCountLabel, moduleRows);
+            const syncModules = () => {
+                const n = Math.min(10, Math.max(1, Math.floor(Number(moduleCount.value) || 1)));
+                const moduleNames = t.model === 'titan' ? ['Нос', 'Центр', 'Корма'] : t.model === 'kolos' ? ['Нос', 'Правое крыло', 'Левое крыло', 'Корма'] : null;
+                t.modules = Array.isArray(t.modules) ? t.modules : [];
+                while (t.modules.length < n)
+                    t.modules.push(2);
+                while (t.modules.length > n)
+                    t.modules.pop();
+                moduleRows.replaceChildren();
+                t.modules.forEach((value, idx) => {
+                    const row = document.createElement('label');
+                    row.className = 'module-row';
+                    row.textContent = (moduleNames ? moduleNames[idx] : 'Модуль ' + (idx + 1)) + ' · мультиатаки';
+                    const input = document.createElement('input');
+                    input.type = 'number';
+                    input.min = 0;
+                    input.max = 1000;
+                    input.step = 1;
+                    input.value = value;
+                    input.setAttribute('aria-label', moduleNames ? moduleNames[idx] : 'Мультиатаки модуля ' + (idx + 1));
+                    input.oninput = () => t.modules[idx] = Math.max(0, Math.floor(Number(input.value) || 0));
+                    row.append(input);
+                    moduleRows.append(row);
+                });
+            };
+            moduleCount.oninput = syncModules;
+            const applyModelView = () => {
+                const m = t.model || 'medium',
+                modular = m === 'modular',
+                fixed = m === 'titan' ? 3 : m === 'kolos' ? 4 : 0;
+                multi.hidden = modular || fixed > 0;
+                modBox.hidden = !(modular || fixed > 0);
+                if (!modular && !fixed)
+                    return;
+                if (fixed) {
+                    moduleCountLabel.hidden = true;
+                    t.modules = [t.modules?.[0] ?? 2, t.modules?.[1] ?? 2, t.modules?.[2] ?? 2, t.modules?.[3] ?? 2].slice(0, fixed);
+                    moduleCount.min = fixed;
+                    moduleCount.max = fixed;
+                    moduleCount.value = fixed;
+                    moduleCount.disabled = true;
+                } else {
+                    moduleCountLabel.hidden = false;
+                    moduleCount.disabled = false;
+                    moduleCount.min = 1;
+                    moduleCount.max = 10;
+                    if (!Array.isArray(t.modules) || !t.modules.length)
+                        t.modules = [2, 2];
+                    moduleCount.value = t.modules.length;
+                }
+                syncModules();
+            };
+            model.onchange = () => {
+                const preset = CLASS_PRESETS[model.value.replace(/^class:/, '')];
+                if (preset) {
+                    t.shipClass = model.value.replace(/^class:/, '');
+                    t.model = preset.model;
+                    t.hp = preset.hp;
+                    t.attackMin = preset.attackMin;
+                    t.attackMax = preset.attackMax;
+                    t.defenseMin = preset.defenseMin;
+                    t.defenseMax = preset.defenseMax;
+                    if (!t.name || t.name === 'Новый тип')
+                        t.name = preset.name;
+                    if (preset.multiAttack === true) {
+                        t.multiAttack = true;
+                        t.attacks = preset.attacks;
+                    } else {
+                        t.multiAttack = false;
+                        t.attacks = 1;
+                    }
+                    if (Array.isArray(preset.modules))
+                        t.modules = [...preset.modules];
+                    for (const input of grid.querySelectorAll('input[data-stat]'))
+                        if (input.dataset.stat in preset)
+                            input.value = t[input.dataset.stat];
+                    name.value = t.name;
+                    check.checked = t.multiAttack === true;
+                    attacks.value = t.attacks >= 2 ? t.attacks : 2;
+                    attacks.disabled = !check.checked;
+                } else {
+                    t.model = model.value;
+                    t.shipClass = undefined;
+                }
+                applyModelView();
+            };
             modelLabel.append(model);
             card.append(modelLabel);
             const grid = document.createElement('div');
@@ -2561,7 +2743,7 @@
                 input.dataset.stat = key;
                 input.value = t[key];
                 input.min = key === 'hp' ? 1 : 0;
-                input.max = key === 'count' ? 500 : key === 'hp' ? 100 : 1000;
+                input.max = key === 'count' ? 500 : key === 'hp' ? 300 : 1000;
                 input.oninput = () => t[key] = Number(input.value);
                 l.append(input);
                 grid.append(l);
@@ -2587,7 +2769,8 @@
             };
             attacks.oninput = () => t.attacks = Number(attacks.value);
             multi.append(check, document.createTextNode('Мультиатака'), attacks);
-            card.append(grid, multi, traitChoices(t), remove);
+            card.append(grid, multi, modBox, traitChoices(t), remove);
+            applyModelView();
             list.append(card);
         });
         add.disabled = types.length >= 20;
@@ -2634,7 +2817,8 @@
             const name = document.createElement('strong');
             name.textContent = t.name;
             const values = document.createElement('p');
-            values.textContent = `${t.count} кораблей · HP ${t.hp} · Атака ${t.attackMin}–${t.attackMax} · Защита ${t.defenseMin}–${t.defenseMax} · Атак за раунд: ${t.multiAttack ? t.attacks : 1}`;
+            const moduleText = (t.model === 'modular' || t.model === 'titan' || t.model === 'kolos') && Array.isArray(t.modules) ? ` · Модули: ${t.modules.length} · атаки: ${t.modules.join(' / ')}` : '';
+            values.textContent = `${t.count} кораблей · HP ${t.hp} · Атака ${t.attackMin}–${t.attackMax} · Защита ${t.defenseMin}–${t.defenseMax} · Атак за раунд: ${t.multiAttack ? t.attacks : 1}${moduleText}`;
             card.append(name, values);
             const traitList = document.createElement('div');
             traitList.className = 'ship-trait-grid';
@@ -6309,7 +6493,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         card.dataset.fleetId = f.id;
         card.append(node('strong', f.name.trim()), node('small', st.count + ' кораблей'));
         for (const t of BattleEngine.types(f))
-            card.append(node('small', `${t.name}: ${t.count} · HP ${t.hp} · А ${t.attackMin}–${t.attackMax} · З ${t.defenseMin}–${t.defenseMax} · ×${t.multiAttack ? t.attacks : 1}`));
+            card.append(node('small', `${t.name}: ${t.count} · HP ${t.hp} · А ${t.attackMin}–${t.attackMax} · З ${t.defenseMin}–${t.defenseMax} · ×${t.multiAttack ? t.attacks : 1}${(t.model === 'modular' || t.model === 'titan' || t.model === 'kolos') && Array.isArray(t.modules) ? ' · Модули: ' + t.modules.length + ' (' + t.modules.join('/') + ' атак)' : ''}`));
         const select = node('select');
         select.setAttribute('aria-label', 'Сторона для ' + f.name.trim());
         select.append(new Option('Не участвует', ''), ...sides.map(s => new Option(s.name, s.id)));
@@ -6620,7 +6804,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
                 x: previous[i].x + (pos[i].x - previous[i].x) * lerp,
                 y: previous[i].y + (pos[i].y - previous[i].y) * lerp
             },
-            size = u.model === 'large' ? 7 : u.model === 'small' ? 3.5 : 5;
+            size = u.model === 'large' ? 7 : u.model === 'small' ? 3.5 : u.model === 'titan' ? 8 : u.model === 'kolos' ? 8 : u.model === 'modular' ? 6 : 5;
             ctx.globalAlpha = dead ? .18 : .95;
             ctx.strokeStyle = s.color;
             ctx.fillStyle = dead ? '#364652' : s.color;
@@ -6632,6 +6816,87 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
                 ctx.lineTo(p.x, p.y + size * .6);
                 ctx.lineTo(p.x - size * .65, p.y + size);
                 ctx.lineTo(p.x - size * .65, p.y - size * .2);
+            } else if (u.model === 'titan') {
+                const H = size * 2.3,
+                jA = -size * 1.3 + H * .4,
+                jB = -size * 1.3 + H * .8,
+                ov = size * .08,
+                hw = dy => size * .5 * (dy + size * 1.3) / H,
+                modHp = state?.unitModuleHp?.[i] ?? (u.modules ? u.modules.map(m => m.hp) : null),
+                segColor = k => {
+                    if (dead)
+                        return '#364652';
+                    const frac = modHp && u.modules ? modHp[k] / (u.modules[k].maxHp || 1) : 1;
+                    return frac <= 0 ? '#1d2a36' : frac < .4 ? '#5a6a78' : s.color;
+                };
+                ctx.fillStyle = segColor(0);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y - size * 1.3);
+                ctx.lineTo(p.x + hw(jA + ov), p.y + jA + ov);
+                ctx.lineTo(p.x - hw(jA + ov), p.y + jA + ov);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = segColor(1);
+                ctx.beginPath();
+                ctx.moveTo(p.x + hw(jA), p.y + jA);
+                ctx.lineTo(p.x + hw(jB + ov), p.y + jB + ov);
+                ctx.lineTo(p.x - hw(jB + ov), p.y + jB + ov);
+                ctx.lineTo(p.x - hw(jA), p.y + jA);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = segColor(2);
+                ctx.beginPath();
+                ctx.moveTo(p.x + hw(jB), p.y + jB);
+                ctx.lineTo(p.x + size * .5, p.y + size);
+                ctx.lineTo(p.x + size * .25, p.y + size);
+                ctx.lineTo(p.x, p.y + size * 1.5);
+                ctx.lineTo(p.x - size * .25, p.y + size);
+                ctx.lineTo(p.x - size * .5, p.y + size);
+                ctx.lineTo(p.x - hw(jB), p.y + jB);
+                ctx.closePath();
+                ctx.fill();
+            } else if (u.model === 'kolos') {
+                // Колос: широкий дротик со вписанным квадратом (поворот 45°), 4 модуля:
+                // 0 нос · 1 левое крыло · 2 правое крыло · 3 киль (квадрат)
+                const d = size * .55,
+                ty = size * .45,
+                jy = size * .35,
+                modHp = state?.unitModuleHp?.[i] ?? (u.modules ? u.modules.map(m => m.hp) : null),
+                segColor = k => {
+                    if (dead)
+                        return '#364652';
+                    const frac = modHp && u.modules ? modHp[k] / (u.modules[k].maxHp || 1) : 1;
+                    return frac <= 0 ? '#1d2a36' : frac < .4 ? '#5a6a78' : s.color;
+                };
+                ctx.fillStyle = segColor(1);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y - size * 1.3);
+                ctx.lineTo(p.x - size * 2.2, p.y + ty);
+                ctx.lineTo(p.x - d, p.y + jy);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = segColor(2);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y - size * 1.3);
+                ctx.lineTo(p.x + size * 2.2, p.y + ty);
+                ctx.lineTo(p.x + d, p.y + jy);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = segColor(0);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y - size * 1.3);
+                ctx.lineTo(p.x - d, p.y + jy);
+                ctx.lineTo(p.x + d, p.y + jy);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = segColor(3);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y - size * .2);
+                ctx.lineTo(p.x + d, p.y + jy);
+                ctx.lineTo(p.x, p.y + size * .9);
+                ctx.lineTo(p.x - d, p.y + jy);
+                ctx.closePath();
+                ctx.fill();
             } else {
                 ctx.moveTo(p.x, p.y - size);
                 ctx.lineTo(p.x + size * .65, p.y + size);
@@ -6684,12 +6949,22 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         const refusals = result.log.filter(l => l.round === result.completedRounds && l.action === 'disobey');
         if (refusals.length)
             $('battle-log').append(node('p', 'Приказы не выполнены: ' + refusals.length + ' · корабли продолжили огонь'));
+        const unitLabel = id => {
+            const u = result.units.find(x => x.id === id);
+            if (!u)
+                return id || '';
+            const side = (sides || []).find(s => s.id === u.sideId) || (result.scores || []).find(s => s.id === u.sideId);
+            const idx = String(id).split('#')[2];
+            return `${side?.name ?? u.sideId} — ${u.typeName || u.id}${/^\d+$/.test(idx ?? '') ? ' ' + (Number(idx) + 1) : ''}`;
+
+        };
         for (const l of result.log.filter(l => l.round === result.completedRounds).slice(-100))
-            log.append(node('div', l.action === 'attack' ? `${l.attacker} → ${l.target}: атака ${l.attackTotal ?? l.attack}, защита ${l.defenseTotal ?? l.defense}, урон ${l.damage}${l.critical ? ' · КРИТ' : ''}` : `${l.attacker || l.unitId || l.unit || ''} · ${{
+            log.append(node('div', l.action === 'attack' ? `${unitLabel(l.attacker)} → ${unitLabel(l.target)}: атака ${l.attackTotal ?? l.attack}, защита ${l.defenseTotal ?? l.defense}, урон ${l.damage}${l.critical ? ' · КРИТ' : ''}` : `${(l.attacker || l.unitId || l.unit) ? unitLabel(l.attacker || l.unitId || l.unit) : ''} · ${{
                         attack_asteroid: 'Огонь по астероиду',
                         asteroid_hit: 'Удар астероида',
                         asteroid_spawn: 'Астероидный дождь',
                         repair: 'Ремонт',
+                        module_lost: 'Уничтожен модуль',
                         shield: 'Силовой щит',
                         disobey: 'Неповиновение',
                         move: 'Перемещение',
@@ -7152,7 +7427,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
     const guide = document.createElement('section');
     guide.innerHTML = '<h3>Круглая арена и командование</h3>';
     const text = document.createElement('p');
-    text.textContent = 'В Столкновении на старте минимум 30% кораблей стороны; игроки сами распределяют корабли по флотам и типам, остальные в собственном арьергарде. Центр — общее Столкновение. Центр теперь может атаковать арьергард. Бонус защиты собственного арьергарда действует только против огня из центра. Из собственного арьергарда можно стрелять в чужой арьергард со штрафом атаки; для огня в центр или свой сектор этот штраф не действует. Значения задаются стороне перед стартом. В чужой тыл можно попасть только через его арьергард. Каждая граница сектора расходует одну атаку. При мультиатаке оставшиеся атаки можно использовать после перемещения. Тыл может атаковать только свой же сектор; корабли в тылу доступны только противникам, вошедшим туда. Корабль в собственном тылу не атакует. Через три завершённых раунда в тылу сбегает окончательно; до этого можно вернуть приказом. Бегство не считается потерей. Приказы по HP и количеству и бонусы бросков действуют в следующем раунде; для продолжения маршрута приказ нужно повторить. Сторона игроков не принимает автоматических решений о движении. Выжившие в тылу учитываются в сохранённых кораблях и восстановятся до полного HP в новом самостоятельном бою. Командиры используют разные приоритеты движения и выбора целей без бонусов к характеристикам: агрессивный не отступает, осторожный спасает побитых, уравновешенный отходит реже, тактик выбирает слабейшую доступную цель. Без командующего 18% действий пропускаются, ещё 10% приводят к случайному разрешённому манёвру. Модели кораблей только визуальные. Предыдущий/следующий раунды восстанавливают HP и позиции. Победа только когда другие стороны уничтожены или сбежали. Следующий раунд проигрывается отдельно; полный расчёт можно остановить. При 50 раундах без изменений расчёт приостанавливается без определения победителя.';
+    text.textContent = 'В Столкновении на старте минимум 30% кораблей стороны; игроки сами распределяют корабли по флотам и типам, остальные в собственном арьергарде. Центр — общее Столкновение. Центр теперь может атаковать арьергард. Бонус защиты собственного арьергарда действует только против огня из центра. Из собственного арьергарда можно стрелять в чужой арьергард со штрафом атаки; для огня в центр или свой сектор этот штраф не действует. Значения задаются стороне перед стартом. В чужой тыл можно попасть только через его арьергард. Каждая граница сектора расходует одну атаку. При мультиатаке оставшиеся атаки можно использовать после перемещения. Тыл может атаковать только свой же сектор; корабли в тылу доступны только противникам, вошедшим туда. Корабль в собственном тылу не атакует. Через три завершённых раунда в тылу сбегает окончательно; до этого можно вернуть приказом. Бегство не считается потерей. Приказы по HP и количеству и бонусы бросков действуют в следующем раунде; для продолжения маршрута приказ нужно повторить. Сторона игроков не принимает автоматических решений о движении. Выжившие в тылу учитываются в сохранённых кораблях и восстановятся до полного HP в новом самостоятельном бою. Командиры используют разные приоритеты движения и выбора целей без бонусов к характеристикам: агрессивный не отступает, осторожный спасает побитых, уравновешенный отходит реже, тактик выбирает слабейшую доступную цель. Без командующего 18% действий пропускаются, ещё 10% приводят к случайному разрешённому манёвру. Модели кораблей визуальные; единственное исключение — модульная модель: она делит HP корабля между модулями. Предыдущий/следующий раунды восстанавливают HP и позиции. Победа только когда другие стороны уничтожены или сбежали. Следующий раунд проигрывается отдельно; полный расчёт можно остановить. При 50 раундах без изменений расчёт приостанавливается без определения победителя.';
     guide.append(text);
     const helpBody = $('combat-help').querySelector('.sector-window-body');
     for (const s of[...helpBody.querySelectorAll('section')])
@@ -7173,7 +7448,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         ['Исправить и сохранить', list('«Отмена» и «Повтор» исправляют операции кисти, очистки и перестроения; хранится до 30 отмен. Новый штрих очищает очередь повтора.', '«Очистить все границы» освобождает весь слой после подтверждения; действие можно отменить.', 'После завершения штриха, отмены или перестроения слой сохраняется в локальном черновике. «Сохранить границы» показывает статус; × также сохраняет и закрывает инструменты, не удаляя слой.', 'Если браузер не даёт сохранить, сразу экспортируйте JSON. JSON и ZIP содержат территории; для общего доступа нужно опубликовать экспорт.', 'Шеврон сворачивает инструменты до заголовка. Выбор держав в слоях приглушает чужие территории, но не удаляет их.')]
     ];
     const battleTopics = [
-        ['1. Стороны, корабли и расстановка', list('Откройте досье боевого события → «Провести сражение». Добавьте 2–6 непустых сторон, назовите их и распределите флоты перетаскиванием или выбором стороны в карточке. Один флот — одна сторона; уничтоженный флот не участвует. Флоты одной стороны не стреляют друг в друга.', 'Каждый корабль — отдельный юнит своего типа. В редакторе флота задаются количество, HP, включительные диапазоны атаки и защиты, модель и мультиатака. Малый / средний / большой — только вид модели, без бонусов.', 'Автоматическая расстановка отправляет в Столкновение первые ceil(30% численности) кораблей каждого флота, остальные — в свой арьергард. Типы заполняются по порядку.', 'Для «Стороны игроков» числа в Столкновении задаются отдельно по флотам и типам; остальное остаётся в своём арьергарде. Проверка минимума — по ВСЕЙ стороне: ceil(число кораблей стороны × 0,3), не 30% каждого типа. Например, 11 кораблей → минимум 4 в центре. В тылу бой не начинается.', 'До запуска задайте постоянные бонус защиты и штраф атаки арьергарда (неотрицательные), «Подтверждаемые криты» и режим мультиатак. При старте правила фиксируются. Начало — расстановка, раунд 0; затем считайте раунды кнопками. Старые поля количества раундов не запускают пакетный расчёт.')],
+        ['1. Стороны, корабли и расстановка', list('Откройте досье боевого события → «Провести сражение». Добавьте 2–6 непустых сторон, назовите их и распределите флоты перетаскиванием или выбором стороны в карточке. Один флот — одна сторона; уничтоженный флот не участвует. Флоты одной стороны не стреляют друг в друга.', 'Каждый корабль — отдельный юнит своего типа. В редакторе флота задаются количество, HP, включительные диапазоны атаки и защиты, модель и мультиатака. Малый / средний / большой — только вид модели, без бонусов. Модель «Модульный» делит HP корабля между модулями; у каждого модуля своё число мультиатак, при уничтожении модуля корабль теряет его атаки до конца боя.', 'Автоматическая расстановка отправляет в Столкновение первые ceil(30% численности) кораблей каждого флота, остальные — в свой арьергард. Типы заполняются по порядку.', 'Для «Стороны игроков» числа в Столкновении задаются отдельно по флотам и типам; остальное остаётся в своём арьергарде. Проверка минимума — по ВСЕЙ стороне: ceil(число кораблей стороны × 0,3), не 30% каждого типа. Например, 11 кораблей → минимум 4 в центре. В тылу бой не начинается.', 'До запуска задайте постоянные бонус защиты и штраф атаки арьергарда (неотрицательные), «Подтверждаемые криты» и режим мультиатак. При старте правила фиксируются. Начало — расстановка, раунд 0; затем считайте раунды кнопками. Старые поля количества раундов не запускают пакетный расчёт.')],
         ['2. Очередь, броски и ровно 1 HP урона', list('В начале раунда живые, ещё не сбежавшие корабли перемешиваются. Погибший до своего действия ничего не делает. Цель каждой атаки выбирается заново среди доступных живых врагов; командир меняет приоритет, при равенстве выбор случайный.', 'Атака и защита бросаются как случайные целые числа от нижнего до верхнего порога включительно. Защита бросается при каждом выстреле и не расходует действие защищающегося.', 'К броскам применяются бонусы и секторные поправки. Итоговая атака строго выше защиты → −1 HP. Равенство или меньшая атака → 0 урона. При HP = 0 корабль уничтожается.', 'Урон успешного выстрела всегда 1 HP, а не разница бросков; подтверждённый крит тоже наносит только 1 HP.') + '<p class="guide-example">Пример: атака 15, защита 12 → −1 HP. Атака 12, защита 12 → 0 HP, если нет подтверждённого крита.</p>'],
         ['3. Подтверждение критов', list('Криты по умолчанию включены. Кандидат на крит появляется ТОЛЬКО при исходном броске атаки, равном исходному верхнему порогу типа. Прибавленный бонус не делает бросок максимальным.', 'Шанс подтверждения: <code>min(100, floor(верхний порог / 5) × 5)%</code>. Верхний порог 4 → 0%; 10 → 10%; 23 → 20%; 100 и выше → 100%. Это шанс ПОСЛЕ максимального броска, не шанс крита каждого выстрела.', 'Кандидат бросает 1–100: результат ≤ шанса подтверждает крит. Он наносит 1 HP независимо от защиты и секторных поправок. Если не подтверждён — действует обычное сравнение итоговых бросков.', 'При отключённых критах нет проверки подтверждения; даже максимальный бросок сравнивается только с защитой. Бонусы и штрафы не меняют исходный максимум и шанс подтверждения.')],
         ['4. Мультиатака и движение', list('Без мультиатаки корабль имеет одно действие за раунд. С мультиатакой — целое число действий от 2, заданное для типа.', 'Обычный режим: один случайный ход корабля, все его действия идут подряд. «Мультиатаки отдельными ходами»: каждое действие отдельно попадает в общую перемешанную очередь; между ними действуют другие корабли. При гибели оставшиеся действия пропускаются.', 'Перемещение расходует ОДНО действие и пересекает ОДНУ границу. На корабль разрешено не более одного перемещения за раунд, даже при мультиатаке. Остальные действия могут атаковать из новой позиции, если есть доступная цель.', 'Маршрут к далёкому сектору занимает несколько раундов; приказ нужно повторять. Например, центр → чужой арьергард → чужой тыл: два раунда движения, не два последовательных прыжка одной мультиатакой.')],
@@ -7193,7 +7468,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         ['8. Приказы игроков: область, HP, количество', '<ol><li>Перед стартом отметьте «Сторона игроков».</li><li>В приказах выберите сторону → её флот → весь флот или конкретный тип. Смена стороны обновляет флоты, смена флота — типы.</li><li>Задайте условие HP, количество и сектор назначения; нажмите «+ Приказ». Можно поставить несколько приказов и удалить лишний через × в очереди.</li><li>Нажмите «Проиграть следующий раунд»: очередь применяется к следующему новому раунду и очищается.</li></ol>' + list('Условия: любое HP, < N, > N, = N, ≤ N, ≥ N. N — абсолютные текущие HP, НЕ проценты. Например, «= 2» выбирает корабли ровно с 2 HP.', 'Количество ограничивает число подходящих живых несбежавших кораблей; 0 в форме означает всех. Отбор делается ДО перемешивания хода, по стабильному порядку кораблей флота / типов, а не по тому, кто ходит первым.', 'Первый подходящий приказ в очереди получает корабль; последующие не перехватывают уже назначенный. Так можно первым приказом отвести 3 корабля с HP ≤ 1, вторым отправить остальных в центр.', 'Приказ задаёт цель маршрута, не телепорт: выполняется один допустимый шаг за раунд. Он отменяет автоматический отход для назначенного корабля. Если корабль уже в назначенном секторе, действие может атаковать.', 'Приказы действуют только один следующий раунд; для продолжения движения добавьте их снова. Сбежавших вернуть нельзя, ещё отведённых — можно.')],
         ['9. Разовые бонусы бросков', list('Выберите область: все корабли, конкретная сторона, флот или тип внутри флота. Введите целые «Атака ±» и «Защита ±»; «+ Бонус» добавляет запись в очередь, × удаляет.', 'Все подходящие бонусы складываются: общий +2 и бонус типа +3 дают этому типу +5. Отрицательные значения разрешены. Бонус атаки относится к стрелку, защиты — к цели.', 'Поправки меняют только итоговые броски, не HP, численность, число действий и не исходные диапазоны для критов. Постоянные настройки арьергарда применяются отдельно.', 'Очередь бонусов применяется лишь к следующему новому раунду и очищается вместе с приказами. В полном расчёте она действует только на первый рассчитанный раунд; для следующих задавайте заново.')],
         ['10. Раунды, полный расчёт и утверждение', list('«Предыдущий» / «Следующий» показывают уже рассчитанную историю, включая раунд 0: восстанавливаются HP, позиции, отвод и бегство. Просмотр не перебрасывает кубики.', '«Проиграть следующий раунд» добавляет один раунд к КОНЦУ расчёта, не к просматриваемому старому раунду. Текущие ранения и случайная последовательность сохраняются.', '«Симулировать полное сражение» считает до победы или ничьей. Та же кнопка «Остановить расчёт» приостанавливает его; после остановки можно задать новые приказы / бонусы и продолжить.', 'После 50 раундов подряд без изменений HP, позиций, бегства и счётчиков тыла полный расчёт приостанавливается БЕЗ победителя. Измените приказы или бонусы; это не ничья и не победа по HP.', 'Анимация не влияет на механику. При уменьшенном движении она отключается. Если доступна «Показать итог», она лишь пропускает показ.', '«Утвердить раунд N» сохраняет именно просматриваемый раунд N (N ≥ 1), даже если бой ещё идёт. До утверждения данные карты и численность флотов не меняются; закрытие × / Esc и возврат к расстановке не списывают корабли.', 'Утверждение добавляет запись в историю события и обновляет число выживших в каждом флоте и типе. Сохраняются активные, отведённые и сбежавшие; только уничтоженные вычитаются. Если состав флота изменился после старта, потребуется новый расчёт.', 'В досье события записи сражений раскрываются отдельно. Новый самостоятельный бой начинает уцелевшие корабли с ПОЛНОГО HP; продолжение текущего расчёта сохраняет ранения. Итоги локальные до экспорта и публикации.')],
-        ['11. Лимиты и чтение отчёта', list('Редактор: 1–20 типов на флот, суммарно до 500 кораблей на флот; HP 1–100, пороги атаки / защиты 0–1000, нижний ≤ верхнего. Численность может быть 0, но пустой флот не вступает в бой.', 'В бою максимум 1500 кораблей и 2 млн потенциальных действий за раунд. У числа мультиатак нет отдельного фиксированного потолка: ограничена общая нагрузка. При ошибке уменьшите состав или число действий.', 'Полный интерактивный расчёт не ограничен старым лимитом 1000 раундов: его ограничивают завершение, ручная остановка и пауза после 50 неизменных раундов.', '«Уцелело» включает все живые корабли, в том числе сбежавшие; «Потеряно» — уничтоженные. «В тылу» — ещё отведённые, «Сбежало» — окончательно покинувшие поле, «Активно» — остальные живые.', 'Журнал сохраняет первые 5000 действий (не только выстрелы). Просмотр выбранного раунда показывает до 100 последних сохранённых записей этого раунда; более поздние действия могут не попасть в журнал, но расчёт и сводка продолжаются.')]
+        ['11. Лимиты и чтение отчёта', list('Редактор: 1–20 типов на флот, суммарно до 500 кораблей на флот; HP 1–300, пороги атаки / защиты 0–1000, нижний ≤ верхнего. Численность может быть 0, но пустой флот не вступает в бой.', 'В бою максимум 1500 кораблей и 2 млн потенциальных действий за раунд. У числа мультиатак нет отдельного фиксированного потолка: ограничена общая нагрузка. При ошибке уменьшите состав или число действий.', 'Полный интерактивный расчёт не ограничен старым лимитом 1000 раундов: его ограничивают завершение, ручная остановка и пауза после 50 неизменных раундов.', '«Уцелело» включает все живые корабли, в том числе сбежавшие; «Потеряно» — уничтоженные. «В тылу» — ещё отведённые, «Сбежало» — окончательно покинувшие поле, «Активно» — остальные живые.', 'Журнал сохраняет первые 5000 действий (не только выстрелы). Просмотр выбранного раунда показывает до 100 последних сохранённых записей этого раунда; более поздние действия могут не попасть в журнал, но расчёт и сводка продолжаются.')]
     ];
     const mainTopics = [
         ['Карта и клавиатура', table(['Действие', 'Управление'], [
@@ -7723,7 +7998,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             continue;
         const heading = id === 'help' ? 'Командиры, черты и дисциплина' : 'Командиры: реестр, черты и неповиновение';
         body.insertBefore(topic(heading, mechanics), body.querySelector('.guide-end'));
-        body.insertBefore(topic('Настройка флота: принадлежность, управление и командир', '<ul><li>В редакторе укажите размещение флота и его принадлежность. Управление задаётся отдельно: ручное или автоматическое; это не тип флота и не его отношение к другим сторонам.</li><li>Командира можно назначить независимо от ручного или автоматического управления. Выберите командира совместимой фракции из реестра или оставьте флот без командующего. Один командир может быть назначен нескольким флотам.</li><li>Состав задаётся типами кораблей: количество, прочность (HP), диапазоны атаки и защиты, модель и мультиатака. Название модели само по себе не даёт боевых бонусов.</li><li>Перед боем проверьте состав сторон и начальное размещение в секторе «Столкновение» и собственном арьергарде. Ручные приказы задаются на следующий раунд; характер и черты назначенного командира продолжают влиять на допустимые атаки.</li></ul>'), body.querySelector('.guide-end'));
+        body.insertBefore(topic('Настройка флота: принадлежность, управление и командир', '<ul><li>В редакторе укажите размещение флота и его принадлежность. Управление задаётся отдельно: ручное или автоматическое; это не тип флота и не его отношение к другим сторонам.</li><li>Командира можно назначить независимо от ручного или автоматического управления. Выберите командира совместимой фракции из реестра или оставьте флот без командующего. Один командир может быть назначен нескольким флотам.</li><li>Состав задаётся типами кораблей: количество, прочность (HP), диапазоны атаки и защиты, модель и мультиатака. Название модели само по себе не даёт боевых бонусов; исключение — модульная модель: её модули делят HP корабля и несут собственные мультиатаки.</li><li>Перед боем проверьте состав сторон и начальное размещение в секторе «Столкновение» и собственном арьергарде. Ручные приказы задаются на следующий раунд; характер и черты назначенного командира продолжают влиять на допустимые атаки.</li></ul>'), body.querySelector('.guide-end'));
     }
     const body = document.querySelector('#combat-help .guide-body');
     if (body) {

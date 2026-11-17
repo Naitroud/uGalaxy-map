@@ -758,3 +758,11 @@ select { font-family: inherit; font-size: inherit; }
 
 /* battle-event-v45.css */
 #battle-event-traits{border:1px solid #365064;background:#0b1723;padding:12px;margin:14px 0;border-radius:5px}#battle-event-traits h3{color:#dfc189;font-size:11px;letter-spacing:1px}#battle-event-traits label{display:grid;grid-template-columns:20px 1fr;gap:6px 10px;padding:10px 0;align-items:center;color:#d4e4ee;font-size:12px}#battle-event-traits label small{grid-column:2;line-height:1.7;color:#97afbf}#battle-event-traits input{accent-color:#dfc189}#battle-event-traits>small{font-size:10px;line-height:1.6;color:#859fac}
+
+/* Модульная модель корабля — конструктор */
+.modular-editor{display:flex;flex-direction:column;gap:8px;margin-top:8px;padding:10px;border:1px solid var(--line);border-radius:4px}
+.modular-editor[hidden]{display:none!important}
+.module-rows{display:flex;flex-direction:column;gap:6px}
+.module-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;color:#bdcbd6}
+.module-row input{width:90px;background:#080f17;border:1px solid var(--line);border-radius:3px;color:var(--ink);padding:5px 8px}
+.module-row input:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
