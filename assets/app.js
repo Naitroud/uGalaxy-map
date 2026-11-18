@@ -1,4 +1,4 @@
-/* build 2026-11-18: главный калибр, класс корабля, скрытие мультиатаки (!important), память приказов */
+/* build 2026-11-18c */
 /* territory-engine.js */
 (function (root, factory) {
     const api = factory();
@@ -7598,7 +7598,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         return true;
     }
     function install() {
-        replace('help', 'Справочник голокарты', 'Выберите объект на карте или в навигации. Досье показывает его данные; пульт ✎ позволяет создавать и редактировать локальный черновик. Ниже — краткий обзор и раскрываемые темы.', mainTopics);
+        replace('help', 'Справочник голокарты', 'Выберите объект на карте или в навигации. Досье показывает его данные; пульт ✎ позволяет создавать и редактировать локальный черновик. Ниже — краткий обзор и раскрываемые темы.<br><br><i class="status-dot" style="width:9px;height:9px;background:#5a6c7c;box-shadow:0 0 8px #5a6c7c66;vertical-align:middle;margin-right:6px"></i> — Идёт загрузка данных голокарты.<br><i class="status-dot" style="width:9px;height:9px;background:#78dfea;box-shadow:0 0 8px #78dfea66;vertical-align:middle;margin-right:6px"></i> — Данные загружены из внешних файлов.<br><i class="status-dot" style="width:9px;height:9px;background:#ffb66a;box-shadow:0 0 8px #ffb66a66;vertical-align:middle;margin-right:6px"></i> — Внешние файлы недоступны, работает встроенный резерв.<br><i class="status-dot" style="width:9px;height:9px;background:#59d68f;box-shadow:0 0 8px #59d68f66;vertical-align:middle;margin-right:6px"></i> — Работает локальный черновик редактора из этого браузера.', mainTopics);
         replace('combat-help', 'Правила сражения', 'Расстановка → один или несколько раундов → просмотр → утверждение. Все правила ниже соответствуют текущему расчёту; раскройте нужную тему.', battleTopics);
         replace('territory-help', 'Работа с территориями', 'Кисть меняет слой границ, не досье систем. Начните с выбора фракции и инструмента; для навигации переключитесь в камеру.', territoryTopics);
     }
@@ -9284,4 +9284,6 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             return btoa(result);
         }
         window.GalaxyChanges.exportCompact = exportCompact;
+		
+
     })();

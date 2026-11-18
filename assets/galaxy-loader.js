@@ -1,3 +1,4 @@
+/* build 2026-11-18c */
 'use strict';
 (() => {
     const node = document.getElementById('galaxy-data'),
@@ -42,60 +43,40 @@
         script.onerror = () => console.error('Unable to load galaxy application bundle');
         document.body.append(script);
     });
-    /* ==== ДОБАВЛЕНО: индикатор источника данных. Выше — исходный код без изменений. ==== */
+    /* ==== ДОБАВЛЕНО: индикатор источника данных (только точка на месте status-dot). Выше — исходный код без изменений. ==== */
     const draftKeys = ['ugalaxy-draft-v7', 'ugalaxy-draft-v6', 'ugalaxy-draft-v4'];
-    const badge = document.createElement('button');
-    badge.type = 'button';
-    badge.id = 'galaxy-source-badge';
-    badge.className = 'galaxy-source-badge';
-    const badgeDot = document.createElement('span');
-    badgeDot.className = 'dot';
-    badgeDot.setAttribute('aria-hidden', 'true');
-    const badgeLabel = document.createElement('span');
-    badgeLabel.className = 'label';
-    badge.append(badgeDot, badgeLabel);
-    badge.setAttribute('aria-live', 'polite');
-    const badgeStyle = document.createElement('style');
-    badgeStyle.textContent = '.galaxy-source-badge{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 10px;background:rgba(10,19,28,.85);border:1px solid #273b4c;border-radius:4px;font:10px "SFMono-Regular",Consolas,monospace;letter-spacing:.4px;color:#bdcbd6;cursor:pointer;transition:color .16s,border-color .16s;vertical-align:middle}.galaxy-source-badge:hover{color:#e4eef6;border-color:#527887}.galaxy-source-badge .dot{width:7px;height:7px;border-radius:50%;background:#5a6c7c;flex:none;transition:background .2s}.galaxy-source-badge[data-state="external"] .dot{background:#59d68f}.galaxy-source-badge[data-state="embedded"] .dot{background:#ffb66a}.galaxy-source-badge[data-state="draft"] .dot{background:#78dfea}.galaxy-source-badge.fallback{position:fixed;right:16px;bottom:54px;z-index:60;height:30px;padding:0 12px;background:rgba(10,19,28,.97);box-shadow:0 5px 20px rgba(0,0,0,.25)}@media (max-width:700px){.galaxy-source-badge.fallback{right:12px;bottom:58px}}';
-    function badgeAppend() {
-        if (!badgeStyle.isConnected)
-            document.head.append(badgeStyle);
-        if (document.body)
-            embed();
-        else
-            document.addEventListener('DOMContentLoaded', embed, {
-                once: true
-            });
-    }
-    let brandEl = null,
+    const dotStyle = document.createElement('style');
+    dotStyle.textContent =
+        'footer.bottom-bar .status-dot{width:7px;height:7px;cursor:pointer;transition:background .2s,box-shadow .2s}' +
+        'footer.bottom-bar .status-dot[data-state="loading"]{background:#5a6c7c;box-shadow:0 0 8px #5a6c7c60}' +
+        'footer.bottom-bar .status-dot[data-state="external"]{background:#78dfea;box-shadow:0 0 8px #78dfea60}' +
+        'footer.bottom-bar .status-dot[data-state="embedded"]{background:#ffb66a;box-shadow:0 0 8px #ffb66a60}' +
+        'footer.bottom-bar .status-dot[data-state="draft"]{background:#59d68f;box-shadow:0 0 8px #59d68f60}';
+    let dotEl = null,
     tries = 0;
-    function findStatusBrand() {
+    function findStatusDot() {
         const footer = document.querySelector('footer.bottom-bar');
         if (!footer)
             return null;
-        return [...footer.querySelectorAll('span')].find(el => el.querySelector('.status-dot')) || null;
+        return footer.querySelector('.status-dot');
     }
     function embed() {
-        if (brandEl && !brandEl.isConnected)
-            brandEl = null;
-        if (!brandEl) {
-            const brand = findStatusBrand();
-            if (brand) {
-                brandEl = brand;
-                brand.hidden = true;
-                badge.classList.remove('fallback');
-            }
-        }
-        if (brandEl) {
-            if (!badge.isConnected)
-                brandEl.after(badge);
+        if (dotEl && !dotEl.isConnected)
+            dotEl = null;
+        if (!dotEl)
+            dotEl = findStatusDot();
+        if (document.head && !dotStyle.isConnected)
+            document.head.append(dotStyle);
+        if (!dotEl) {
+            if (tries++ < 60)
+                setTimeout(embed, 300);
             return;
         }
-        if (!badge.isConnected)
-            document.body.append(badge);
-        badge.classList.add('fallback');
-        if (tries++ < 60)
-            setTimeout(embed, 300);
+        dotEl.dataset.state = 'loading';
+        const brand = dotEl.closest('span');
+        if (brand)
+            brand.setAttribute('aria-live', 'polite');
+        render();
     }
     function activeDraftKey() {
         for (const key of draftKeys) {
@@ -106,7 +87,7 @@
         }
         return null;
     }
-    function badgeRender() {
+    function render() {
         let state,
         title;
         const dk = activeDraftKey();
@@ -123,18 +104,15 @@
             state = 'embedded';
             title = 'Внешние JSON недоступны, работает встроенный резерв. Причина: ' + (window.GalaxyDataLoadError || 'неизвестна') + '. Клик — подробности в консоли.';
         }
-        badge.dataset.state = state;
-        badgeLabel.textContent = {
-            loading: 'загрузка данных…',
-            external: 'внешние данные',
-            embedded: 'встроенные данные',
-            draft: 'локальный черновик'
-        }
-        [state];
-        badge.title = title;
-        badge.setAttribute('aria-label', title);
+        if (!dotEl || !dotEl.isConnected)
+            return;
+        dotEl.dataset.state = state;
+        dotEl.title = title;
+        dotEl.setAttribute('aria-label', title);
     }
-    badge.addEventListener('click', () => {
+    document.addEventListener('click', event => {
+        if (!dotEl || event.target !== dotEl)
+            return;
         const dk = activeDraftKey();
         if (dk) {
             try {
@@ -149,18 +127,18 @@
         else
             console.info('[Голокарта] Источник: встроенный резерв. Причина fallback:', window.GalaxyDataLoadError);
     });
-    document.addEventListener('galaxy-data-changed', badgeRender);
+    document.addEventListener('galaxy-data-changed', render);
     window.addEventListener('storage', event => {
         if (event.key === null || draftKeys.includes(event.key))
-            badgeRender();
+            render();
     });
-    badgeAppend();
-    badgeRender();
+    embed();
+    render();
     window.GalDataReady.then(() => {
-        badgeRender();
+        render();
         // Подстраховка: черновик применяется в app.js после загрузки бандла — перепроверяем ещё несколько раз
-        setTimeout(badgeRender, 400);
-        setTimeout(badgeRender, 1500);
-        setTimeout(badgeRender, 4000);
+        setTimeout(render, 400);
+        setTimeout(render, 1500);
+        setTimeout(render, 4000);
     });
 })();
