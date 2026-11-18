@@ -1,3 +1,4 @@
+/* build 2026-11-19a: бонусы командующих (сдвиг attackMin/defenseMin) */
 /* build 2026-11-18c */
 /* territory-engine.js */
 (function (root, factory) {
@@ -1300,11 +1301,20 @@
             personality: c.personality,
             level,
             traits: [...selected],
+            attackBonus: commanderBonus(c.attackBonus),
+            defenseBonus: commanderBonus(c.defenseBonus),
             ...(c.id !== undefined ? {
                 id: c.id
             }
                  : {})
         };
+    }
+    function commanderBonus(v) {
+        if (v === undefined || v === null)
+            return 0;
+        if (!Number.isInteger(v) || v < -1000 || v > 1000)
+            throw Error('Некорректный бонус командира: целое число от -1000 до 1000.');
+        return v;
     }
     function traitSum(unit, key) {
         return (unit.commander?.traits ?? []).reduce((n, id) => n + (traits[id]?.[key] ?? 0), 0);
@@ -1670,9 +1680,9 @@
                             } : {}),
                             maxHp: t.hp,
                             hp: t.hp,
-                            attackMin: t.attackMin,
+                            attackMin: Math.min(t.attackMin + (c?.attackBonus ?? 0), t.attackMax),
                             attackMax: t.attackMax,
-                            defenseMin: t.defenseMin,
+                            defenseMin: Math.min(t.defenseMin + (c?.defenseBonus ?? 0), t.defenseMax),
                             defenseMax: t.defenseMax,
                             position: index++ < Math.ceil(count * .3) ? 'center' : 'guard:' + side.id,
                             withdrawn: false,
@@ -3288,7 +3298,10 @@
             const cards = document.createElement('div');
             cards.className = 'registry-trait-grid';
             cards.innerHTML = window.CommanderRegistry?.traitHTML(c.traits) || '';
-            $('commander-registry-preview').append(levelBadge(c), heading, cards);
+            const bp = document.createElement('p');
+            bp.className = 'commander-bonus-line';
+            bp.innerHTML = window.CommanderRegistry?.bonusHTML?.(c) || '';
+            $('commander-registry-preview').append(levelBadge(c), heading, bp, cards);
         }
     }
     function candidates(preferred) {
@@ -7736,9 +7749,15 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             if (new Set(c.traits).size !== c.traits.length || c.traits.some(id => !Object.hasOwn(traits(), id)))
                 throw Error('Неизвестная или повторная черта командующего.');
             ids.add(c.id);
+            const ab = c.attackBonus === undefined ? 0 : c.attackBonus,
+            db = c.defenseBonus === undefined ? 0 : c.defenseBonus;
+            if (!Number.isInteger(ab) || ab < -1000 || ab > 1000 || !Number.isInteger(db) || db < -1000 || db > 1000)
+                throw Error('Бонус командующего: целое число от -1000 до 1000.');
             return {
                 ...c,
                 level: commanderLevel(c),
+                attackBonus: ab,
+                defenseBonus: db,
                 id: c.id,
                 name: c.name.trim(),
                 factionGroup: c.factionGroup || null,
@@ -7770,6 +7789,14 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
                 "'": '&#39;'
             }
                 [c]));
+    function bonusHTML(c) {
+        const a = c?.attackBonus ?? 0,
+        d = c?.defenseBonus ?? 0;
+        if (!a && !d)
+            return '';
+        const sign = n => (n > 0 ? '+' : '') + n;
+        return `<p class="commander-bonus-line">Бонус атаки ${sign(a)} · Бонус защиты ${sign(d)}</p>`;
+    }
     function traitHTML(ids) {
         return (ids || []).map(id => {
             const t = traits()[id];
@@ -7783,7 +7810,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
     dialog.id = 'commander-registry-dialog';
     dialog.className = 'sector-window';
     dialog.setAttribute('aria-labelledby', 'registry-title');
-    dialog.innerHTML = '<header class="dialog-head standard-header"><h2 id="registry-title">КОМАНДУЮЩИЕ</h2><button type="button" class="icon-btn" id="registry-close" aria-label="Закрыть">×</button></header><div class="sector-window-body"><div id="registry-list"><button type="button" id="registry-create">+ Создать командующего</button><p class="registry-note">До четырёх черт. Один командующий может возглавлять несколько флотов любой фракции. Фракция — только категория и герб.</p><div id="registry-categories"></div></div><form id="registry-form" hidden><button type="button" id="registry-back">← К списку</button><div class="registry-fields"><label>Имя<input id="registry-name" maxlength="100" required></label><label>Фракция<select id="registry-faction"></select></label><label>Характер<select id="registry-personality"></select></label><label>Уровень · 1–10<input id="registry-level" type="number" min="1" max="10" step="1" value="5" required></label><label>Настроить уровень<input id="registry-level-range" type="range" min="1" max="10" step="1" value="5" aria-label="Уровень командующего"></label></div><p id="registry-character-description"></p><fieldset><legend>Черты · не более 4</legend><div id="registry-traits" class="registry-trait-grid"></div></fieldset><p id="registry-error" role="alert"></p><button type="submit">Сохранить</button></form></div>';
+    dialog.innerHTML = '<header class="dialog-head standard-header"><h2 id="registry-title">КОМАНДУЮЩИЕ</h2><button type="button" class="icon-btn" id="registry-close" aria-label="Закрыть">×</button></header><div class="sector-window-body"><div id="registry-list"><button type="button" id="registry-create">+ Создать командующего</button><p class="registry-note">До четырёх черт. Один командующий может возглавлять несколько флотов любой фракции. Фракция — только категория и герб.</p><div id="registry-categories"></div></div><form id="registry-form" hidden><button type="button" id="registry-back">← К списку</button><div class="registry-fields"><label>Имя<input id="registry-name" maxlength="100" required></label><label>Фракция<select id="registry-faction"></select></label><label>Характер<select id="registry-personality"></select></label><label>Уровень · 1–10<input id="registry-level" type="number" min="1" max="10" step="1" value="5" required></label><label>Настроить уровень<input id="registry-level-range" type="range" min="1" max="10" step="1" value="5" aria-label="Уровень командующего"></label></div><div class="registry-bonus-row"><span>Бонус Атаки</span><span class="registry-bonus-right">Бонус Защиты</span></div><div class="registry-bonus-inputs"><input id="registry-attack-bonus" type="number" step="1" min="-1000" max="1000" value="0" aria-label="Бонус Атаки"><input id="registry-defense-bonus" type="number" step="1" min="-1000" max="1000" value="0" aria-label="Бонус Защиты"></div><p id="registry-character-description"></p><fieldset><legend>Черты · не более 4</legend><div id="registry-traits" class="registry-trait-grid"></div></fieldset><p id="registry-error" role="alert"></p><button type="submit">Сохранить</button></form></div>';
     document.body.append(dialog);
     let editingId = null,
     portrait = null,
@@ -7907,7 +7934,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             return `<section class="registry-category"><h3 style="border-color:${escape(g.color)}">${escape(g.label)} <span>${cs.length}</span></h3>${cs.length ? cs.map(c => {
                 const assigned = d.fleets.filter(f => f.commanderId === c.id),
                 options = d.fleets.filter(f => compatible(c, f, d) && f.commanderId !== c.id);
-                return `<article class="commander-card" data-commander-id="${escape(c.id)}"><div class="commander-card-head">${portraitHTML(c)}<h4>${escape(c.name)}</h4><span class="commander-level">Уровень ${commanderLevel(c)}</span><button type="button" data-action="edit">Изменить</button><button type="button" data-action="delete">Удалить</button></div><p class="commander-author-summary">${escape((c.description || '').slice(0, 180))}${(c.description || '').length > 180 ? '…' : ''}</p><p>${escape(window.BattleEngine?.personalities[c.personality]?.name || c.personality)} · ${escape(g.label)}</p><div class="registry-trait-grid">${traitHTML(c.traits)}</div><p>Назначен на флоты: ${assigned.length}</p>${assigned.map(f => `<div class="registry-assignment"><span>${escape(f.name)}</span><button type="button" data-action="unassign" data-fleet-id="${escape(f.id)}">Снять</button></div>`).join('')}<div class="registry-assignment"><select aria-label="Назначить на флот">${options.length ? '<option value="">Выберите любой флот</option>' + options.map(f => `<option value="${escape(f.id)}">${escape(f.name)}${f.commanderId ? ' · сменить командующего' : ''}</option>`).join('') : '<option value="">Нет доступных флотов</option>'}</select><button type="button" data-action="assign" ${options.length ? '' : 'disabled'}>Назначить</button></div></article>`;
+                return `<article class="commander-card" data-commander-id="${escape(c.id)}"><div class="commander-card-head">${portraitHTML(c)}<h4>${escape(c.name)}</h4><span class="commander-level">Уровень ${commanderLevel(c)}</span><button type="button" data-action="edit">Изменить</button><button type="button" data-action="delete">Удалить</button></div><p class="commander-author-summary">${escape((c.description || '').slice(0, 180))}${(c.description || '').length > 180 ? '…' : ''}</p><p>${escape(window.BattleEngine?.personalities[c.personality]?.name || c.personality)} · ${escape(g.label)}</p>${bonusHTML(c)}<div class="registry-trait-grid">${traitHTML(c.traits)}</div><p>Назначен на флоты: ${assigned.length}</p>${assigned.map(f => `<div class="registry-assignment"><span>${escape(f.name)}</span><button type="button" data-action="unassign" data-fleet-id="${escape(f.id)}">Снять</button></div>`).join('')}<div class="registry-assignment"><select aria-label="Назначить на флот">${options.length ? '<option value="">Выберите любой флот</option>' + options.map(f => `<option value="${escape(f.id)}">${escape(f.name)}${f.commanderId ? ' · сменить командующего' : ''}</option>`).join('') : '<option value="">Нет доступных флотов</option>'}</select><button type="button" data-action="assign" ${options.length ? '' : 'disabled'}>Назначить</button></div></article>`;
             }).join('') : '<p class="registry-empty">Командующих пока нет.</p>'}</section>`;
         }).join('');
     }
@@ -7923,6 +7950,8 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         $('registry-name').value = c?.name || '';
         $('registry-level').value = commanderLevel(c);
         $('registry-level-range').value = commanderLevel(c);
+        $('registry-attack-bonus').value = c?.attackBonus ?? 0;
+        $('registry-defense-bonus').value = c?.defenseBonus ?? 0;
         const d = app.getData();
         $('registry-faction').replaceChildren(new Option('Без принадлежности', ''), ...d.groups.map(g => new Option(g.label, g.key)));
         $('registry-faction').value = c?.factionGroup || '';
@@ -7962,6 +7991,12 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
                 dialog.close();
         }
     });
+    function readBonus(v, label) {
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < -1000 || n > 1000)
+            throw Error(label + ': целое число от -1000 до 1000.');
+        return n;
+    }
     $('registry-form').onsubmit = e => {
         e.preventDefault();
         try {
@@ -7970,6 +8005,8 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             const d = app.getData(),
             c = {
                 level: Number($('registry-level').value),
+                attackBonus: readBonus($('registry-attack-bonus').value, 'Бонус Атаки'),
+                defenseBonus: readBonus($('registry-defense-bonus').value, 'Бонус Защиты'),
                 description: $('registry-author-description').value,
                 portrait,
                 id: editingId || 'cmd-' + crypto.randomUUID(),
