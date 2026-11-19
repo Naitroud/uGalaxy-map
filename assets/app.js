@@ -1,3 +1,5 @@
+/* build 2026-11-20b: статичный визуал щита на боевом канвасе (drawShield) */
+/* build 2026-11-20a: пул щитов (конструктор, бой, регенерация) */
 /* build 2026-11-19b: цвет маркеров фракций (markerColor с фолбэком на цвет фракции) */
 /* build 2026-11-18c */
 /* territory-engine.js */
@@ -1370,7 +1372,8 @@
             attackMax: f.attackMax ?? 20,
             defenseMin: f.defenseMin ?? 5,
             defenseMax: f.defenseMax ?? 20,
-            hp: f.hp ?? 3
+            hp: f.hp ?? 3,
+            shield: f.shield ?? Math.floor((f.hp ?? 3) / 2)
         };
         for (const [k, v] of Object.entries(s))
             if (!Number.isInteger(v) || v < (k === 'hp' ? 1 : 0) || v > (k === 'count' ? 500 : k === 'hp' ? 300 : 1000))
@@ -1659,6 +1662,9 @@
                             traits: [...t.traits],
                             rearTraitTriggered: false,
                             forceShield: 0,
+                            shield: t.shield,
+                            maxShield: t.shield,
+                            quietRounds: 0,
                             commander: c ? {
                                 ...c,
                                 traits: [...c.traits]
@@ -1948,10 +1954,18 @@
             const j = Math.floor(random() * (i + 1));
             [order[i], order[j]] = [order[j], order[i]];
         }
-        const hitUnit = (target, dmg) => {
+        const shieldDamaged = new Set(),
+        hitUnit = (target, dmg) => {
+            if (dmg > 0 && target.shield > 0) {
+                target.shield = Math.max(0, target.shield - dmg);
+                shieldDamaged.add(target.id);
+                return true;
+            }
+            if (dmg > 0)
+                shieldDamaged.add(target.id);
             if (!target.modules) {
                 target.hp = Math.max(0, target.hp - dmg);
-                return;
+                return false;
             }
             for (let d = 0; d < dmg; d++) {
                 const alive = target.modules.filter(m => m.hp > 0);
@@ -1971,6 +1985,7 @@
                 }
             }
             target.hp = target.modules.some(m => m.hp > 0) ? target.modules.reduce((n, m) => n + m.hp, 0) : 0;
+            return false;
         };
         const attackAsteroid = (attacker, target, turn, shot, extra = {}) => {
             const rawAttack = roll(attacker.attackMin, attacker.attackMax),
@@ -2292,7 +2307,7 @@
                 const shieldConsumed = shieldDefense > 0 && damage > 0;
                 if (shieldConsumed)
                     target.forceShield = 0;
-                hitUnit(target, damage);
+                const shieldAbsorbed = hitUnit(target, damage) === true;
                 record({
                     round,
                     turn,
@@ -2315,6 +2330,7 @@
                     damage,
                     shieldDefense,
                     shieldConsumed,
+                    shieldAbsorbed,
                     targetHp: target.hp,
                     ...(longReady ? {
                         longShot: true,
@@ -2332,7 +2348,7 @@
                     const target = candidates[roll(0, candidates.length - 1)],
                     shieldConsumed = (target.forceShield ?? 0) > 0;
                     target.forceShield = 0;
-                    hitUnit(target, 1);
+                    const asteroidAbsorbed = hitUnit(target, 1) === true;
                     record({
                         round,
                         action: 'asteroid_damage',
@@ -2341,12 +2357,27 @@
                         targetPosition: target.position,
                         damage: 1,
                         targetHp: target.hp,
-                        shieldConsumed
+                        shieldConsumed,
+                        shieldAbsorbed: asteroidAbsorbed
                     });
                 }
             }
         for (const u of units)
             if (u.hp > 0 && !u.escaped) {
+                if (shieldDamaged.has(u.id))
+                    u.quietRounds = 0;
+                else
+                    u.quietRounds = (u.quietRounds ?? 0) + 1;
+                if (u.quietRounds >= 2 && (u.maxShield ?? 0) > 0 && u.shield < u.maxShield) {
+                    u.shield = Math.min(u.maxShield, u.shield + 1);
+                    record({
+                        round,
+                        action: 'shield_regen',
+                        unit: u.id,
+                        position: u.position,
+                        shield: u.shield
+                    });
+                }
                 u.withdrawn = u.position === 'rear:' + u.sideId;
                 u.rearTurns = u.withdrawn ? u.rearTurns + 1 : 0;
                 if (!u.withdrawn)
@@ -2408,6 +2439,8 @@
             disobedience,
             unitRearTraitTriggered: units.map(u => u.rearTraitTriggered),
             unitForceShield: units.map(u => u.forceShield),
+            unitShield: units.map(u => u.shield),
+            unitQuiet: units.map(u => u.quietRounds),
             unitCenterEntryRound: units.map(u => u.centerEntryRound),
             unitEmergencyReentryRound: units.map(u => u.emergencyReentryRound),
             unitHp: units.map(u => u.hp),
@@ -2465,6 +2498,8 @@
                     rearTurns: snapshot?.unitRearTurns?.[i] ?? 0,
                     rearTraitTriggered: snapshot?.unitRearTraitTriggered?.[i] ?? false,
                     forceShield: snapshot?.unitForceShield?.[i] ?? 0,
+                    shield: snapshot?.unitShield?.[i] ?? u.maxShield ?? 0,
+                    quietRounds: snapshot?.unitQuiet?.[i] ?? 0,
                     aiRetreat: snapshot?.unitAiRetreat?.[i] ?? false,
                     centerEntryRound: snapshot?.unitCenterEntryRound?.[i] ?? null,
                     emergencyReentryRound: snapshot?.unitEmergencyReentryRound?.[i] ?? null
@@ -2523,7 +2558,7 @@
     section.append(heading, list, add);
     $('fleet-fields').append(section);
     const labels = {
-        count: 'Количество',
+        shield: 'Щит',
         hp: 'HP',
         attackMin: 'Атака от',
         attackMax: 'Атака до',
@@ -2531,13 +2566,13 @@
         defenseMax: 'Защита до'
     },
     CLASS_PRESETS = Object.freeze({
-        corvette: {name: 'Корвет', model: 'small', hp: 2, attackMin: 1, attackMax: 20, defenseMin: 1, defenseMax: 20, multiAttack: false, attacks: 1},
-        destroyer: {name: 'Эсминец', model: 'medium', hp: 4, attackMin: 1, attackMax: 20, defenseMin: 2, defenseMax: 20, multiAttack: false, attacks: 1},
-        frigate: {name: 'Фрегат', model: 'medium', hp: 4, attackMin: 2, attackMax: 30, defenseMin: 2, defenseMax: 30, multiAttack: true, attacks: 2},
-        cruiser: {name: 'Крейсер', model: 'large', hp: 6, attackMin: 3, attackMax: 30, defenseMin: 3, defenseMax: 30, multiAttack: true, attacks: 3},
-        battleship: {name: 'Линкор', model: 'large', hp: 10, attackMin: 4, attackMax: 40, defenseMin: 4, defenseMax: 40, multiAttack: true, attacks: 3},
-        titan: {name: 'Титан', model: 'titan', hp: 30, attackMin: 3, attackMax: 50, defenseMin: 3, defenseMax: 50, modules: [1, 2, 2]},
-        kolos: {name: 'Колос', model: 'kolos', hp: 160, attackMin: 11, attackMax: 50, defenseMin: 7, defenseMax: 50, modules: [1, 2, 2, 2]}
+        corvette: {name: 'Корвет', model: 'small', hp: 2, shield: 1, attackMin: 1, attackMax: 20, defenseMin: 1, defenseMax: 20, multiAttack: false, attacks: 1},
+        destroyer: {name: 'Эсминец', model: 'medium', hp: 4, shield: 2, attackMin: 1, attackMax: 20, defenseMin: 2, defenseMax: 20, multiAttack: false, attacks: 1},
+        frigate: {name: 'Фрегат', model: 'medium', hp: 4, shield: 2, attackMin: 2, attackMax: 30, defenseMin: 2, defenseMax: 30, multiAttack: true, attacks: 2},
+        cruiser: {name: 'Крейсер', model: 'large', hp: 6, shield: 3, attackMin: 3, attackMax: 30, defenseMin: 3, defenseMax: 30, multiAttack: true, attacks: 3},
+        battleship: {name: 'Линкор', model: 'large', hp: 10, shield: 5, attackMin: 4, attackMax: 40, defenseMin: 4, defenseMax: 40, multiAttack: true, attacks: 3},
+        titan: {name: 'Титан', model: 'titan', hp: 30, shield: 15, attackMin: 3, attackMax: 50, defenseMin: 3, defenseMax: 50, modules: [1, 2, 2]},
+        kolos: {name: 'Колос', model: 'kolos', hp: 160, shield: 80, attackMin: 11, attackMax: 50, defenseMin: 7, defenseMax: 50, modules: [1, 2, 2, 2]}
     });
 
     const shipTraitIds = ['repair_drones', 'force_shields', 'warp_jump', 'swarm_fleet', 'sniper_nose'];
@@ -2753,6 +2788,7 @@
                     t.attackMax = preset.attackMax;
                     t.defenseMin = preset.defenseMin;
                     t.defenseMax = preset.defenseMax;
+                    t.shield = preset.shield;
                     if (!t.name || t.name === 'Новый тип')
                         t.name = preset.name;
                     if (preset.multiAttack === true) {
@@ -2781,9 +2817,27 @@
             };
             modelLabel.append(model);
             card.append(modelLabel);
+            const countRow = document.createElement('div');
+            countRow.className = 'ship-count-row';
+            for (const key of['count']) {
+                const l = document.createElement('label');
+                l.textContent = labels[key];
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.dataset.stat = key;
+                input.value = t[key];
+                input.min = 0;
+                input.max = 500;
+                input.oninput = () => t[key] = Number(input.value);
+                l.append(input);
+                countRow.append(l);
+            }
+            card.append(countRow);
             const grid = document.createElement('div');
             grid.className = 'editor-grid';
             for (const [key, label] of Object.entries(labels)) {
+                if (key === 'count')
+                    continue;
                 const l = document.createElement('label');
                 l.textContent = label;
                 const input = document.createElement('input');
@@ -2791,7 +2845,7 @@
                 input.dataset.stat = key;
                 input.value = t[key];
                 input.min = key === 'hp' ? 1 : 0;
-                input.max = key === 'count' ? 500 : key === 'hp' ? 300 : 1000;
+                input.max = key === 'hp' ? 300 : 1000;
                 input.oninput = () => t[key] = Number(input.value);
                 l.append(input);
                 grid.append(l);
@@ -2828,6 +2882,7 @@
             id: crypto.randomUUID(),
             name: 'Новый тип',
             traits: [],
+            shield: 1,
             count: 10,
             hp: 3,
             attackMin: 5,
@@ -2866,7 +2921,7 @@
             name.textContent = t.name;
             const values = document.createElement('p');
             const moduleText = (t.model === 'modular' || t.model === 'titan' || t.model === 'kolos') && Array.isArray(t.modules) ? ` · Модули: ${t.modules.length} · атаки: ${t.modules.join(' / ')}` : '';
-            values.textContent = `${t.count} кораблей · HP ${t.hp} · Атака ${t.attackMin}–${t.attackMax} · Защита ${t.defenseMin}–${t.defenseMax} · Атак за раунд: ${t.multiAttack ? t.attacks : 1}${moduleText}`;
+            values.textContent = `${t.count} кораблей · HP ${t.hp} · Атака ${t.attackMin}–${t.attackMax} · Защита ${t.defenseMin}–${t.defenseMax} · Атак за раунд: ${t.multiAttack ? t.attacks : 1} · Щит ${t.shield}${moduleText}`;
             card.append(name, values);
             const traitList = document.createElement('div');
             traitList.className = 'ship-trait-grid';
@@ -6548,7 +6603,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         card.dataset.fleetId = f.id;
         card.append(node('strong', f.name.trim()), node('small', st.count + ' кораблей'));
         for (const t of BattleEngine.types(f))
-            card.append(node('small', `${t.name}: ${t.count} · HP ${t.hp} · А ${t.attackMin}–${t.attackMax} · З ${t.defenseMin}–${t.defenseMax} · ×${t.multiAttack ? t.attacks : 1}${(t.model === 'modular' || t.model === 'titan' || t.model === 'kolos') && Array.isArray(t.modules) ? ' · Модули: ' + t.modules.length + ' (' + t.modules.join('/') + ' атак)' : ''}`));
+            card.append(node('small', `${t.name}: ${t.count} · HP ${t.hp} · А ${t.attackMin}–${t.attackMax} · З ${t.defenseMin}–${t.defenseMax} · Щ ${t.shield} · ×${t.multiAttack ? t.attacks : 1}${(t.model === 'modular' || t.model === 'titan' || t.model === 'kolos') && Array.isArray(t.modules) ? ' · Модули: ' + t.modules.length + ' (' + t.modules.join('/') + ' атак)' : ''}`));
         const select = node('select');
         select.setAttribute('aria-label', 'Сторона для ' + f.name.trim());
         select.append(new Option('Не участвует', ''), ...sides.map(s => new Option(s.name, s.id)));
@@ -6772,6 +6827,37 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             };
         });
     }
+        function drawShield(ctx, x, y, radius, color, bright) {
+        const a = Math.max(.15, bright),
+        glow = (v, al) => {
+            const n = parseInt(v.slice(1), 16);
+            return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${al})`;
+        };
+        const grad = ctx.createRadialGradient(x, y, radius * .15, x, y, radius);
+        grad.addColorStop(0, glow(color, 0));
+        grad.addColorStop(.7, glow(color, .05 * a));
+        grad.addColorStop(1, glow(color, .2 * a));
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = glow(color, .55 * a);
+        ctx.lineWidth = Math.max(.9, radius * .07);
+        ctx.shadowColor = glow(color, .8);
+        ctx.shadowBlur = radius * .4;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = glow(color, .32 * a);
+        ctx.lineWidth = .8;
+        ctx.setLineDash([Math.max(1.5, radius * .13), Math.max(3.5, radius * .3)]);
+        ctx.beginPath();
+        ctx.arc(x, y, radius * .82, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    const SHIELD_RADIUS = {small: 9.2, medium: 11, large: 13.3, modular: 12.2, titan: 17, kolos: 23};
     function draw(round, progress) {
         const c = $('battle-canvas');
         if (c.width !== 1000 || c.height !== 720) {
@@ -6860,6 +6946,11 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
                 y: previous[i].y + (pos[i].y - previous[i].y) * lerp
             },
             size = u.model === 'large' ? 7 : u.model === 'small' ? 3.5 : u.model === 'titan' ? 8 : u.model === 'kolos' ? 8 : u.model === 'modular' ? 6 : 5;
+            if (!dead && (u.maxShield || 0) > 0) {
+                const shieldNow = state?.unitShield?.[i] ?? u.maxShield ?? 0;
+                if (shieldNow > 0)
+                    drawShield(ctx, p.x, p.y, SHIELD_RADIUS[u.model] || 11, s.color, shieldNow / (u.maxShield || 1));
+            }
             ctx.globalAlpha = dead ? .18 : .95;
             ctx.strokeStyle = s.color;
             ctx.fillStyle = dead ? '#364652' : s.color;
@@ -7014,13 +7105,14 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
 
         };
         for (const l of result.log.filter(l => l.round === result.completedRounds).slice(-100))
-            log.append(node('div', l.action === 'attack' ? `${unitLabel(l.attacker)} → ${unitLabel(l.target)}: атака ${l.attackTotal ?? l.attack}, защита ${l.defenseTotal ?? l.defense}, урон ${l.damage}${l.critical ? ' · КРИТ' : ''}${l.longShot ? ' · дальний выстрел' : ''}` : `${(l.attacker || l.unitId || l.unit) ? unitLabel(l.attacker || l.unitId || l.unit) : ''} · ${{
+            log.append(node('div', l.action === 'attack' ? `${unitLabel(l.attacker)} → ${unitLabel(l.target)}: атака ${l.attackTotal ?? l.attack}, защита ${l.defenseTotal ?? l.defense}, урон ${l.damage}${l.critical ? ' · КРИТ' : ''}${l.shieldAbsorbed ? ' · щит' : ''}${l.longShot ? ' · дальний выстрел' : ''}` : `${(l.attacker || l.unitId || l.unit) ? unitLabel(l.attacker || l.unitId || l.unit) : ''} · ${{
                         attack_asteroid: 'Огонь по астероиду',
                         asteroid_hit: 'Удар астероида',
                         asteroid_spawn: 'Астероидный дождь',
                         repair: 'Ремонт',
                         module_lost: 'Уничтожен модуль',
                         shield: 'Силовой щит',
+                        shield_regen: 'Регенерация щита',
                         disobey: 'Неповиновение',
                         move: 'Перемещение',
                         skip: 'Пропуск',
@@ -7295,12 +7387,12 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             try {
                 for (let i = 0; i < 5 && !fullResult.finished; i++) {
                     const before = JSON.stringify({
-                        ships: fullResult.units.map(u => [u.hp, u.position, u.escaped, u.rearTurns, u.forceShield]),
+                        ships: fullResult.units.map(u => [u.hp, u.position, u.escaped, u.rearTurns, u.forceShield, u.shield]),
                         asteroids: fullResult.asteroids || []
                     });
                     advanceRound(false);
                     const after = JSON.stringify({
-                        ships: fullResult.units.map(u => [u.hp, u.position, u.escaped, u.rearTurns, u.forceShield]),
+                        ships: fullResult.units.map(u => [u.hp, u.position, u.escaped, u.rearTurns, u.forceShield, u.shield]),
                         asteroids: fullResult.asteroids || []
                     });
                     unchanged = before === after ? unchanged + 1 : 0;
@@ -7444,7 +7536,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         }
         panel.hidden = false;
         const stats = BattleEngine.stats(item);
-        panel.append(field('Тип флота', stats.count === 0 ? 'Уничтоженный' : 'Целый'), field('Численность', stats.count + ' кораблей'), field('HP каждого корабля', item.shipTypes ? 'По типу корабля' : stats.hp), field('Атака', item.shipTypes ? 'По типу корабля' : stats.attackMin + '–' + stats.attackMax), field('Защита', item.shipTypes ? 'По типу корабля' : stats.defenseMin + '–' + stats.defenseMax));
+        panel.append(field('Тип флота', stats.count === 0 ? 'Уничтоженный' : 'Целый'), field('Численность', stats.count + ' кораблей'), field('HP каждого корабля', item.shipTypes ? 'По типу корабля' : stats.hp), field('Атака', item.shipTypes ? 'По типу корабля' : stats.attackMin + '–' + stats.attackMax), field('Защита', item.shipTypes ? 'По типу корабля' : stats.defenseMin + '–' + stats.defenseMax), field('Щит каждого корабля', item.shipTypes ? 'По типу корабля' : stats.shield));
         if (stats.count === 0) {
             $('inspector-emblem').classList.add('destroyed-model');
             const badge = document.createElement('div');
