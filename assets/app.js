@@ -1,4 +1,4 @@
-/* build 2026-11-19a: бонусы командующих (сдвиг attackMin/defenseMin) */
+/* build 2026-11-19b: цвет маркеров фракций (markerColor с фолбэком на цвет фракции) */
 /* build 2026-11-18c */
 /* territory-engine.js */
 (function (root, factory) {
@@ -672,7 +672,7 @@
             b.classList.toggle('capital-marker', s.order === '0');
             b.style.left = (s.x + 5.5) + 'px';
             b.style.top = (s.y + 5.5) + 'px';
-            b.style.setProperty('--marker-color', groups.get(s.group).color);
+            b.style.setProperty('--marker-color', groups.get(s.group).markerColor || groups.get(s.group).color);
             b.setAttribute('aria-label', s.name.trim());
             b.dataset.id = s.id;
             b.append(text(node('span', 'system-label'), s.name.trim()));
@@ -720,10 +720,11 @@
             b.style.setProperty('--fleet-base', (s.color ? 32 : 22) + 'px');
             b.style.zIndex = String(100 - rank);
             b.classList.toggle('event-attached', data.events.some(e => String(e.id) === String(f.system)));
-            const fleetColor = colorOf({
+            const fleetGroup = groupOf({
                 ...f,
                 isFleet: true
-            });
+            }),
+            fleetColor = fleetGroup.markerColor || fleetGroup.color;
             b.style.color = fleetColor;
             b.style.borderColor = fleetColor;
             b.style.setProperty('--marker-color', fleetColor);
@@ -3704,6 +3705,7 @@
             names.add(name);
             return {
                 ...g,
+                markerColor: /^#[0-9a-f]{6}$/i.test(g.markerColor) ? g.markerColor : g.color,
                 overlord: g.overlord ?? null
             };
         });
@@ -8641,6 +8643,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
                 names.add(name);
                 return {
                     ...g,
+                    markerColor: /^#[0-9a-f]{6}$/i.test(g.markerColor) ? g.markerColor : g.color,
                     overlord: g.overlord ?? null
                 };
             });
@@ -8679,7 +8682,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
         dialog.id = 'faction-manager-dialog';
         dialog.className = 'sector-window';
         dialog.setAttribute('aria-labelledby', 'faction-manager-title');
-        dialog.innerHTML = '<header class="dialog-head standard-header"><h2 id="faction-manager-title">УПРАВЛЕНИЕ ФРАКЦИЯМИ</h2><button type="button" class="icon-btn" id="faction-manager-close" aria-label="Закрыть">×</button></header><div class="sector-window-body"><p class="faction-manager-note">Независимые державы и вассалы. Принадлежность систем меняется в редакторе объекта; исходные названия и история сохраняются.</p><div class="faction-manager-layout"><section><button type="button" id="faction-manager-create">+ Создать фракцию</button><div id="faction-manager-list"></div></section><form id="faction-manager-form"><h3 id="faction-manager-form-title">Новая фракция</h3><label>Название<input id="faction-manager-name" maxlength="100" required autocomplete="off"></label><label>Цвет<input id="faction-manager-color" type="color" value="#78dfea" required></label><label>Сюзерен<select id="faction-manager-overlord"></select></label><p id="faction-manager-key"></p><p id="faction-manager-error" role="alert" aria-live="polite"></p><button type="submit">Сохранить фракцию</button></form></div></div>';
+        dialog.innerHTML = '<header class="dialog-head standard-header"><h2 id="faction-manager-title">УПРАВЛЕНИЕ ФРАКЦИЯМИ</h2><button type="button" class="icon-btn" id="faction-manager-close" aria-label="Закрыть">×</button></header><div class="sector-window-body"><p class="faction-manager-note">Независимые державы и вассалы. Принадлежность систем меняется в редакторе объекта; исходные названия и история сохраняются.</p><div class="faction-manager-layout"><section><button type="button" id="faction-manager-create">+ Создать фракцию</button><div id="faction-manager-list"></div></section><form id="faction-manager-form"><h3 id="faction-manager-form-title">Новая фракция</h3><label>Название<input id="faction-manager-name" maxlength="100" required autocomplete="off"></label><label>Цвет<input id="faction-manager-color" type="color" value="#78dfea" required></label><label>Цвет маркеров<input id="faction-manager-marker-color" type="color" required></label><label>Сюзерен<select id="faction-manager-overlord"></select></label><p id="faction-manager-key"></p><p id="faction-manager-error" role="alert" aria-live="polite"></p><button type="submit">Сохранить фракцию</button></form></div></div>';
         document.body.append(dialog);
         let editingKey = null;
         // Close only when both gestures belong to the genuine backdrop, never content.
@@ -8715,6 +8718,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
             $('faction-manager-form-title').textContent = g ? 'Изменить фракцию' : 'Новая фракция';
             $('faction-manager-name').value = g?.label || '';
             $('faction-manager-color').value = g?.color || '#78dfea';
+            $('faction-manager-marker-color').value = g?.markerColor || g?.color || '#78dfea';
             $('faction-manager-overlord').replaceChildren(new Option('Независимая · без сюзерена', ''), ...d.groups.filter(p => p.key !== key).map(p => new Option(p.label, p.key)));
             $('faction-manager-overlord').value = g?.overlord || '';
             $('faction-manager-key').textContent = g ? 'Постоянный ключ: ' + g.key : 'Ключ будет создан автоматически и не изменится при переименовании.';
@@ -8739,6 +8743,7 @@ frontPathEl(d,{stroke:'rgba(0, 0, 0,.92)','stroke-width':2,'stroke-dasharray':'7
                     key,
                     label: $('faction-manager-name').value.trim(),
                     color: $('faction-manager-color').value,
+                    markerColor: $('faction-manager-marker-color').value,
                     overlord: $('faction-manager-overlord').value || null
                 };
                 d.groups = validate(old ? d.groups.map(p => p.key === key ? g : p) : [...d.groups, g]);
